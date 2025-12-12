@@ -1,0 +1,315 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>Build Your Own RTOS Part2：硬件自动压栈 | Kallocain.</title><meta name="author" content="SandOcean"><meta name="copyright" content="SandOcean"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="Build Your Own RTOS 系列文章：  理解M3架构 当前阅读：硬件自动压栈   1 “保存现场”在上一篇中，我们已经讲解了中断发生时，硬件自动进行的操作以及我们需要执行的操作。但我们还没有亲眼见证过硬件的动作，这一次我们将设计一个中断并触发它，看看硬件究竟会做些什么。 1.1 准备工作由于我们使用CubeMX自动生成文件，代码里已经设定好了时钟树和SysTick。我们进入stm3">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Build Your Own RTOS Part2：硬件自动压栈">
+<meta property="og:url" content="https://sandocean.cn/2025/12/12/2025-12-12-RTOS2/index.html">
+<meta property="og:site_name" content="Kallocain.">
+<meta property="og:description" content="Build Your Own RTOS 系列文章：  理解M3架构 当前阅读：硬件自动压栈   1 “保存现场”在上一篇中，我们已经讲解了中断发生时，硬件自动进行的操作以及我们需要执行的操作。但我们还没有亲眼见证过硬件的动作，这一次我们将设计一个中断并触发它，看看硬件究竟会做些什么。 1.1 准备工作由于我们使用CubeMX自动生成文件，代码里已经设定好了时钟树和SysTick。我们进入stm3">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg">
+<meta property="article:published_time" content="2025-12-11T16:00:00.000Z">
+<meta property="article:modified_time" content="2025-12-12T13:36:00.793Z">
+<meta property="article:author" content="SandOcean">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Build Your Own RTOS Part2：硬件自动压栈",
+  "url": "https://sandocean.cn/2025/12/12/2025-12-12-RTOS2/",
+  "image": "https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg",
+  "datePublished": "2025-12-11T16:00:00.000Z",
+  "dateModified": "2025-12-12T13:36:00.793Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "SandOcean",
+      "url": "https://sandocean.cn"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg"><link rel="canonical" href="https://sandocean.cn/2025/12/12/2025-12-12-RTOS2/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//hm.baidu.com"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.min.css" media="print" onload="this.media='all'"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?b9733e1826ee6247512254081aee7846";
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+btf.addGlobalFn('pjaxComplete', () => {
+  _hmt.push(['_trackPageview',window.location.pathname])
+}, 'baidu_analytics')
+</script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: {"path":"/search.xml","preload":true,"top_n_per_article":1,"unescape":false,"languages":{"hits_empty":"未找到符合您查询的内容：${query}","hits_stats":"共找到 ${hits} 篇文章"}},
+  translate: undefined,
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '天',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'fancybox',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: false,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: 'Build Your Own RTOS Part2：硬件自动压栈',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><link rel="stylesheet" href="/css/custom.css" media="defer" onload="this.media='all'"><meta name="generator" content="Hexo 7.3.0"></head><body><div id="web_bg" style="background-image: url(/img/111.jpg);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">11</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">5</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><span class="site-name">Kallocain.</span></a><a class="nav-page-title" href="/"><span class="site-name">Build Your Own RTOS Part2：硬件自动压栈</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div id="search-button"><span class="site-page social-icon search"><i class="fas fa-search fa-fw"></i><span> 搜索</span></span></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">Build Your Own RTOS Part2：硬件自动压栈</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2025-12-11T16:00:00.000Z" title="发表于 2025-12-12 00:00:00">2025-12-12</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2025-12-12T13:36:00.793Z" title="更新于 2025-12-12 21:36:00">2025-12-12</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/Build-Your-Own-RTOS-%E7%B3%BB%E5%88%97/">Build Your Own RTOS 系列</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">1.2k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>3分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><blockquote>
+<p><strong>Build Your Own RTOS 系列文章</strong>：</p>
+<ol>
+<li><a href="/2025/12/10/2025-12-10-RTOS1/" title="Build Your Own RTOS Part1：理解M3架构的寄存器">理解M3架构</a></li>
+<li><strong>当前阅读：硬件自动压栈</strong></li>
+</ol>
+</blockquote>
+<h2 id="1-“保存现场”"><a href="#1-“保存现场”" class="headerlink" title="1 “保存现场”"></a>1 “保存现场”</h2><p>在上一篇中，我们已经讲解了中断发生时，硬件自动进行的操作以及我们需要执行的操作。但我们还没有亲眼见证过硬件的动作，这一次我们将设计一个中断并触发它，看看硬件究竟会做些什么。</p>
+<h3 id="1-1-准备工作"><a href="#1-1-准备工作" class="headerlink" title="1.1 准备工作"></a>1.1 准备工作</h3><p>由于我们使用CubeMX自动生成文件，代码里已经设定好了时钟树和SysTick。我们进入<code>stm32f1xx_it.c</code>文件寻找一下<code>SysTick_Handler()</code>，然后将其修改成这样：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">SysTick_Handler</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="comment">/* USER CODE BEGIN SysTick_IRQn 0 */</span></span><br><span class="line">  __NOP();</span><br><span class="line">  <span class="comment">/* USER CODE END SysTick_IRQn 0 */</span></span><br><span class="line">  <span class="comment">//HAL_IncTick();</span></span><br><span class="line">  <span class="comment">/* USER CODE BEGIN SysTick_IRQn 1 */</span></span><br><span class="line"></span><br><span class="line">  <span class="comment">/* USER CODE END SysTick_IRQn 1 */</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p><code>__NOP()</code>是一个宏，代表空指令，在这里设置一个断点（Keil中不允许对空行打断点）。然后我们注释掉<code>HAL_IncTick()</code>，先不管HAL库的SysTick逻辑。在主函数里的<code>HAL_Init()</code>函数中，会自动初始化SysTick，所以我们可以直接观察这个中断。</p>
+<p>这一次我们同样创建一个函数<code>void set_registers()</code>，它的目的和上次“伪造现场”的目的类似，但是这一次我们不填充R4-R11，而是填充R0-R3。</p>
+<div class='spoiler collapsed'>
+    <div class='spoiler-title'>
+        点击查看答案
+    </div>
+    <div class='spoiler-content'>
+        <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">__asm <span class="type">void</span> <span class="title function_">set_registers</span><span class="params">(<span class="type">void</span>)</span> </span><br><span class="line">&#123;</span><br><span class="line">  MOV R0, #<span class="number">0X11111111</span></span><br><span class="line">  MOV R1, #<span class="number">0X22222222</span></span><br><span class="line">  MOV R2, #<span class="number">0X33333333</span></span><br><span class="line">  MOV R3, #<span class="number">0X44444444</span></span><br><span class="line"></span><br><span class="line">  BX LR</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+    </div>
+</div>
+
+<p>然后我们回到<code>main.c</code>中，在<code>main</code>函数的<code>while(1)</code>循环里调用<code>set_registers()</code>，调试运行等待程序碰到断点。</p>
+<h3 id="1-2-观察现象"><a href="#1-2-观察现象" class="headerlink" title="1.2 观察现象"></a>1.2 观察现象</h3><p><img src="https://pic1.imgdb.cn/item/693bfde1eb1155844d20fef9.png"></p>
+<p>我们看到图中，SP对应的内存地址的确整齐的排列好了我们伪造的数据。这证明了：</p>
+<ol>
+<li>中断的确发生了。</li>
+<li>中断发生时，硬件会自动将R0-R3等寄存器压入栈中。</li>
+</ol>
+<p>然后我们再看看<code>0x44444444</code>后面都有些什么。</p>
+<p><img src="https://pic1.imgdb.cn/item/693c0134eb1155844d20ffb4.png"></p>
+<p><img src="https://pic1.imgdb.cn/item/693c013feb1155844d20ffb5.png"></p>
+<p>它们分别是（小端序）：</p>
+<ul>
+<li><p><code>00 0F 00 00</code>：这就是R12的值，只不过在内存里翻过来了。</p>
+</li>
+<li><p><code>B9 0A 00 08</code>：这是LR的值(<code>0x08000AB9</code>)，他代表了中断结束后，程序要回到的地址。</p>
+<p>  <img src="https://pic1.imgdb.cn/item/693c0208fac5ef130364dc32.png"></p>
+<p>  图中的<code>0x08000AB8</code>就是<code>while(1)</code>。这说明程序马上要回到循环中。（还记得为什么LR的值和实际地址差1吗？）</p>
+</li>
+<li><p><code>58 01 00 08</code>：这是PC的值，也就是被打断点的<code>__NOP()</code>的地址。</p>
+</li>
+<li><p><code>00 00 00 61</code>：这是xPSR的值。是状态寄存器在<strong>进入中断前</strong>的状态。</p>
+</li>
+</ul>
+<p>那么，寄存器窗口的值为什么会与栈中的数据不一样呢？</p>
+<p>我们一个个来看：</p>
+<ul>
+<li>寄存器中LR(<code>0xFFFFFFF9</code>)：这其实是<strong>EXC_RETURN</strong>（异常返回码）一旦进入中断，硬件会自动把LR寄存器改成这个特殊值。</li>
+<li>寄存器中xPSR(<code>0x6100000F</code>):还记得xPSR的低位代表什么吗？<code>0x0F</code>是十进制的15，代表<strong>SysTick Exception</strong>，说明目前正在处理SysTick中断。</li>
+</ul>
+<p><strong>至此，我们已经通过实验验证了：在触发中断后，硬件会自动将一些寄存器的值压入栈中，且它们的顺序是<code>xPSR</code> -&gt; <code>PC</code> -&gt; <code>LR</code> -&gt; <code>R12</code> -&gt; <code>R3-R0</code></strong>。这非常重要，推荐记在小本本上。</p>
+<p>但于此同时，也引出了第二个问题：虽然我们已经处理好了这些数据，但是中断结束后怎么办？我该如何知道是使用MSP还是PSP？</p>
+<p>这就用到了异常返回码。实际上，当异常返回码进入PC后，就会启动中断返回序列。合法的异常返回码只有三个：</p>
+<ul>
+<li><code>0xFFFF FFF1</code>：返回Handler模式</li>
+<li><code>0xFFFF FFF9</code>：返回线程模式，并使用MSP</li>
+<li><code>0xFFFF FFFD</code>：返回线程模式，并使用PSP</li>
+</ul>
+<p>主程序在线程模式下，使用哪个栈进入了中断，就会以哪个栈退出中断（以异常返回码标志）。</p>
+<h2 id="2-双栈"><a href="#2-双栈" class="headerlink" title="2 双栈"></a>2 双栈</h2><p>我们已经知道，RTOS是使用两个栈的，那我们就来模拟一下使用两个栈。</p>
+<p>我们需要在<code>main</code>函数里，初始化SysTick前，设置PSP寄存器的值为MSP - 1024(模拟开辟了一个任务栈)，然后将CONTROL寄存器的<code>Bit[1]</code>置1。同样的，我们编写一个函数<code>void create_fake_task()</code>来完成。</p>
+<div class='spoiler collapsed'>
+    <div class='spoiler-title'>
+        点击查看答案
+    </div>
+    <div class='spoiler-content'>
+        <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">__asm <span class="type">void</span> <span class="title function_">create_fake_task</span><span class="params">()</span></span><br><span class="line">&#123;</span><br><span class="line">  MOV R0, #<span class="number">0x20002000</span></span><br><span class="line">  MSR PSP, R0</span><br><span class="line">  MOV R0, #<span class="number">2</span></span><br><span class="line">  MSR CONTROL, R0</span><br><span class="line">  ISB ;指令同步隔离，确保程序生效</span><br><span class="line">  BX LR</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+    </div>
+</div>
+
+<p><img src="https://pic1.imgdb.cn/item/693c1898fac5ef1303655d1c.png"></p>
+<p>我们可以非常清楚的看到，LR的值变成了<code>0xFFFFFFFD</code>，符合我们的预期。</p>
+<h2 id="3-总结"><a href="#3-总结" class="headerlink" title="3 总结"></a>3 总结</h2><p>本期我们承接着上期的内容，完整的看了一遍中断的全流程，对<strong>硬件自动做的</strong>和<strong>软件（我们）需要做的</strong>已经有了明确的了解。下期我们将完成一次真正的 <strong>“任务切换”</strong></p>
+<link rel="stylesheet" href="/css/spoiler.css" type="text/css"><script src="/js/spoiler.js" type="text/javascript" async></script></article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://sandocean.cn">SandOcean</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://sandocean.cn/2025/12/12/2025-12-12-RTOS2/">https://sandocean.cn/2025/12/12/2025-12-12-RTOS2/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://sandocean.cn" target="_blank">Kallocain.</a>！</span></div></div><div class="tag_share"><div class="post-share"><div class="social-share" data-image="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" data-sites="facebook,twitter,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related full-width" href="/2025/12/10/2025-12-10-RTOS1/" title="Build Your Own RTOS Part1：理解M3架构的寄存器"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">Build Your Own RTOS Part1：理解M3架构的寄存器</div></div><div class="info-2"><div class="info-item-1"> Build Your Own RTOS 系列文章：  当前阅读：理解M3架构 硬件自动压栈   写在前面懂一个东西的最好办法就是自己做一个。 刚好不管是单片机开发方面还是Linux方面，实时操作系统的原理都是非常重要的，于是我打算开启这个系列，用大约两个月的时间自己动手制作一个基于STM32F103C8T6(Cortex-M3，以后简称CM3)平台的RTOS。这个系列仅作为个人项目记录，只能作为参考，不能当做教程。本系列需要有微机原理、STM32开发和RTOS的前置知识，如果你还没有接触过，请先入门这几个领域后再阅读本系列。如果你打算跟随本系列，需要了解以下内容：作者使用的编译环境是Keil ARMCC V5.06、使用STM32CubeMX自动生成HAL库的Keil项目文件。 1 认识寄存器CM3架构的MCU拥有通用寄存器 R0-R15 以及一些特殊功能寄存器。   图源：《Cortex-M3权威指南》 1.1 通用寄存器（R0-R12）这里简单提一下，根据AAPCS（ARM Architecture Procedure Call Standard，ARM过程调用标准），为了...</div></div></div></a></nav></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">SandOcean</div><div class="author-info-description">兴趣使然</div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">11</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">5</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/SandOcean-ovo"><i class="fab fa-github"></i><span>Visit My Github</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://space.bilibili.com/39935035" target="_blank" title="bilibili"><i class="fab fa-bilibili" style="color: #00aeec;"></i></a><a class="social-icon" href="mailto:sandocean435@gmail.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a><a class="social-icon" href="https://www.zhihu.com/people/unbreakable-71" target="_blank" title="Zhihu"><i class="fab fa-zhihu" style="color: #0084ff;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">欢迎来到我的博客！
+转载请注明出处，并保留原文链接。
+</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#1-%E2%80%9C%E4%BF%9D%E5%AD%98%E7%8E%B0%E5%9C%BA%E2%80%9D"><span class="toc-number">1.</span> <span class="toc-text">1 “保存现场”</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-1-%E5%87%86%E5%A4%87%E5%B7%A5%E4%BD%9C"><span class="toc-number">1.1.</span> <span class="toc-text">1.1 准备工作</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-2-%E8%A7%82%E5%AF%9F%E7%8E%B0%E8%B1%A1"><span class="toc-number">1.2.</span> <span class="toc-text">1.2 观察现象</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-%E5%8F%8C%E6%A0%88"><span class="toc-number">2.</span> <span class="toc-text">2 双栈</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#3-%E6%80%BB%E7%BB%93"><span class="toc-number">3.</span> <span class="toc-text">3 总结</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/12/2025-12-12-RTOS2/" title="Build Your Own RTOS Part2：硬件自动压栈">Build Your Own RTOS Part2：硬件自动压栈</a><time datetime="2025-12-11T16:00:00.000Z" title="发表于 2025-12-12 00:00:00">2025-12-12</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/10/2025-12-10-RTOS1/" title="Build Your Own RTOS Part1：理解M3架构的寄存器">Build Your Own RTOS Part1：理解M3架构的寄存器</a><time datetime="2025-12-09T16:00:00.000Z" title="发表于 2025-12-10 00:00:00">2025-12-10</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/03/2025-12-03-%E6%A0%91%E8%8E%93%E6%B4%BE%E8%B0%83%E8%AF%951/" title="树莓派：解决 picamera2 在 pyenv 环境下的 ModuleNotFoundError: No module named 'libcamera'">树莓派：解决 picamera2 在 pyenv 环境下的 ModuleNotFoundError: No module named 'libcamera'</a><time datetime="2025-12-02T16:00:00.000Z" title="发表于 2025-12-03 00:00:00">2025-12-03</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/08/29/2025-08-29-%E6%89%AA%E5%BF%83%E8%87%AA%E9%97%AE%EF%BC%88%E4%BA%8C%EF%BC%89/" title="扪心自问（二）">扪心自问（二）</a><time datetime="2025-08-28T16:00:00.000Z" title="发表于 2025-08-29 00:00:00">2025-08-29</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/08/12/2025-08-12-%E6%89%AA%E5%BF%83%E8%87%AA%E9%97%AE/" title="扪心自问">扪心自问</a><time datetime="2025-08-11T16:00:00.000Z" title="发表于 2025-08-12 00:00:00">2025-08-12</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;2025 By SandOcean</span><span class="framework-info"><span>框架 </span><a target="_blank" rel="noopener" href="https://hexo.io">Hexo 7.3.0</a><span class="footer-separator">|</span><span>主题 </span><a target="_blank" rel="noopener" href="https://github.com/jerryc127/hexo-theme-butterfly">Butterfly 5.4.2</a></span></div><div class="footer_custom_text">活着多好呀！我写这些文章的目的也就是使人觉得：活着多好呀！--汪曾祺<p><a target="_blank" href="https://hexo.io/"><img src="https://img.shields.io/badge/Frame-Hexo-blue?style=flat&logo=hexo" title="博客框架为Hexo"></a>&nbsp;<a target="_blank" href="https://butterfly.js.org/"><img src="https://img.shields.io/badge/Theme-Butterfly-6513df?style=flat&logo=bitdefender" title="主题采用butterfly"></a>&nbsp;<a target="_blank" href="https://vercel.com/ "><img src="https://img.shields.io/badge/Hosted-Vervel-brightgreen?style=flat&logo=Vercel" title="本站线路托管于Vercel"></a>&nbsp;<a target="_blank" href="https://github.com/"><img src="https://img.shields.io/badge/Source-Github-d021d6?style=flat&logo=GitHub" title="本站项目由Gtihub托管"></a>&nbsp;<a target="_blank" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/Copyright-BY--NC--SA%204.0-d42328?style=flat&logo=Claris" title="本站采用知识共享署名-非商业性使用-相同方式共享4.0国际许可协议进行许可"></a></p></div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js"></script><script src="/js/main.js"></script><script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.umd.min.js"></script><div class="js-pjax"></div><div class="aplayer no-destroy" data-id="14033257171" data-server="netease" data-type="playlist" data-fixed="true" data-autoplay="true" data-mini="true" data-loop="all" data-volume="0.7" data-mutex="true"> </div><script defer type="text/javascript" src="https://cdn1.tianli0.top/npm/sweetalert2@8.19.0/dist/sweetalert2.all.js"></script><script defer src="/js/lunar.js"></script><script defer src="/js/day.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax/pjax.min.js"></script><script>(() => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => fn())
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      const usePjax = true
+      false
+        ? (usePjax ? pjax.loadUrl('/404.html') : window.location.href = '/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})()</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script><div id="local-search"><div class="search-dialog"><nav class="search-nav"><span class="search-dialog-title">搜索</span><span id="loading-status"></span><button class="search-close-button"><i class="fas fa-times"></i></button></nav><div class="text-center" id="loading-database"><i class="fas fa-spinner fa-pulse"></i><span>  数据加载中</span></div><div class="search-wrap"><div id="local-search-input"><div class="local-search-box"><input class="local-search-box--input" placeholder="搜索" type="text"/></div></div><hr/><div id="local-search-results"></div><div id="local-search-stats-wrap"></div></div></div><div id="search-mask"></div><script src="/js/search/local-search.js"></script></div></div></body></html>
