@@ -1,0 +1,307 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>Build Your Own RTOS Part5：时间片轮转 | Kallocain.</title><meta name="author" content="SandOcean"><meta name="copyright" content="SandOcean"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="Build Your Own RTOS 系列文章：  理解M3架构 硬件自动压栈 初始化栈 PendSV 当前阅读：时间片轮转   1 RTOS的心跳如果说PendSV是RTOS的心脏，那SysTick就是RTOS的心跳。在前几期中，我们已经搞定了上下文切换，但是任务的切换必须要放在任务函数里，由任务函数手动触发PendSV中断。也就是说，现在的任务是顺序执行的（做完你的做你的，做完你的做你的）">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Build Your Own RTOS Part5：时间片轮转">
+<meta property="og:url" content="https://sandocean.cn/2025/12/16/2025-12-16-RTOS5/index.html">
+<meta property="og:site_name" content="Kallocain.">
+<meta property="og:description" content="Build Your Own RTOS 系列文章：  理解M3架构 硬件自动压栈 初始化栈 PendSV 当前阅读：时间片轮转   1 RTOS的心跳如果说PendSV是RTOS的心脏，那SysTick就是RTOS的心跳。在前几期中，我们已经搞定了上下文切换，但是任务的切换必须要放在任务函数里，由任务函数手动触发PendSV中断。也就是说，现在的任务是顺序执行的（做完你的做你的，做完你的做你的）">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg">
+<meta property="article:published_time" content="2025-12-15T16:00:00.000Z">
+<meta property="article:modified_time" content="2025-12-16T12:51:41.604Z">
+<meta property="article:author" content="SandOcean">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Build Your Own RTOS Part5：时间片轮转",
+  "url": "https://sandocean.cn/2025/12/16/2025-12-16-RTOS5/",
+  "image": "https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg",
+  "datePublished": "2025-12-15T16:00:00.000Z",
+  "dateModified": "2025-12-16T12:51:41.604Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "SandOcean",
+      "url": "https://sandocean.cn"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg"><link rel="canonical" href="https://sandocean.cn/2025/12/16/2025-12-16-RTOS5/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//hm.baidu.com"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.min.css" media="print" onload="this.media='all'"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?b9733e1826ee6247512254081aee7846";
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+btf.addGlobalFn('pjaxComplete', () => {
+  _hmt.push(['_trackPageview',window.location.pathname])
+}, 'baidu_analytics')
+</script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: {"path":"/search.xml","preload":true,"top_n_per_article":1,"unescape":false,"languages":{"hits_empty":"未找到符合您查询的内容：${query}","hits_stats":"共找到 ${hits} 篇文章"}},
+  translate: undefined,
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '天',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'fancybox',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: false,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: 'Build Your Own RTOS Part5：时间片轮转',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><link rel="stylesheet" href="/css/custom.css" media="defer" onload="this.media='all'"><meta name="generator" content="Hexo 7.3.0"></head><body><div id="web_bg" style="background-image: url(/img/111.jpg);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">5</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><span class="site-name">Kallocain.</span></a><a class="nav-page-title" href="/"><span class="site-name">Build Your Own RTOS Part5：时间片轮转</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div id="search-button"><span class="site-page social-icon search"><i class="fas fa-search fa-fw"></i><span> 搜索</span></span></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">Build Your Own RTOS Part5：时间片轮转</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2025-12-15T16:00:00.000Z" title="发表于 2025-12-16 00:00:00">2025-12-16</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2025-12-16T12:51:41.604Z" title="更新于 2025-12-16 20:51:41">2025-12-16</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/Build-Your-Own-RTOS-%E7%B3%BB%E5%88%97/">Build Your Own RTOS 系列</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">2.2k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>7分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><blockquote>
+<p><strong>Build Your Own RTOS 系列文章</strong>：</p>
+<ol>
+<li><a href="/2025/12/10/2025-12-10-RTOS1/" title="Build Your Own RTOS Part1：理解M3架构的寄存器">理解M3架构</a></li>
+<li><a href="/2025/12/12/2025-12-12-RTOS2/" title="Build Your Own RTOS Part2：硬件自动压栈">硬件自动压栈</a></li>
+<li><a href="/2025/12/13/2025-12-13-RTOS3/" title="Build Your Own RTOS Part3：初始化栈">初始化栈</a></li>
+<li><a href="/2025/12/15/2025-12-15-RTOS4/" title="Build Your Own RTOS Part4：PendSV">PendSV</a></li>
+<li><strong>当前阅读：时间片轮转</strong></li>
+</ol>
+</blockquote>
+<h2 id="1-RTOS的心跳"><a href="#1-RTOS的心跳" class="headerlink" title="1 RTOS的心跳"></a>1 RTOS的心跳</h2><p>如果说<code>PendSV</code>是RTOS的心脏，那<code>SysTick</code>就是RTOS的心跳。在前几期中，我们已经搞定了上下文切换，但是任务的切换必须要放在任务函数里，由任务函数手动触发<code>PendSV</code>中断。也就是说，现在的任务是顺序执行的（<del>做完你的做你的，做完你的做你的</del>）。</p>
+<p>既然我们想要一个<strong>并发执行</strong>的系统，我们就不能让任务自己决定什么时候切换，要把这个“发令枪”交给一个定期高频触发的中断，也就是我们设置的<code>SysTick</code>。虽然实际上我们知道，CPU并没有真正的同时做多件事情的能力，但是由于我们的<code>SysTick</code>间隔很短，看起来就好像CPU在同时处理多个任务一样。这就是<strong>时间片轮转</strong>（Time-Slice Round-Robin）。</p>
+<p>时间片就是我们设定的<code>SysTick</code>中断的间隔时间，通常是<code>1ms</code>；轮转就是大家排好队一个一个来，就这么简单。</p>
+<p>为了让我们的代码结构更清晰，更符合工程规范，从这一期开始，我们会严格遵守<strong>软件分层解耦</strong>的设计思想：</p>
+<ul>
+<li><strong><code>os_core.c</code></strong>：负责内核的纯业务逻辑（调度算法、任务管理），尽量不包含硬件相关的寄存器操作。</li>
+<li><strong><code>os_cpu.c</code></strong>：负责底层的硬件抽象（寄存器配置、触发中断），给内核提供接口。</li>
+<li><strong><code>stm32f1xx_it.c</code></strong>：负责接收硬件中断，并将其转发给内核处理。</li>
+</ul>
+<h2 id="2-SysTick-硬件初始化"><a href="#2-SysTick-硬件初始化" class="headerlink" title="2 SysTick 硬件初始化"></a>2 <code>SysTick</code> 硬件初始化</h2><p><code>SysTick</code>定时器是一个系统级的24位倒计时基础定时器。如果你有过<code>STM32</code>的<code>HAL</code>库开发经验，你一定或多或少的听过或用过这个定时器。</p>
+<p>我们都知道定时器的基本原理：每个定时器的时钟周期，定时器的值（在这里是）自减1，直到其减至0后触发一次中断，然后其回到重装载值，重复以上过程。</p>
+<p>如果你查阅<strong>CMSIS</strong>的驱动中的<code>core_cm3.h</code>，会发现它已经定义好了一个初始化函数<code>SysTick_Config()</code>，我们直接拿来用。我们在<code>os_cpu.c</code>中编写一个硬件初始化函数<code>OS_Init_Timer()</code>。</p>
+<p>注意：虽然大多数情况下<code>PendSV</code>和<code>SysTick</code>的中断优先级都设为最低不会有什么问题，但是我们这里还是把<code>SysTick</code>设成比<code>PendSV</code>高一级（14，PendSV设为15）。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_cpu.c */</span></span><br><span class="line"><span class="comment">/* 记得在 os_cpu.h 中 #include &quot;stm32f1xx.h&quot; 以获取 SysTick_IRQn 定义 */</span></span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_Init_Timer</span><span class="params">(<span class="type">uint32_t</span> ms)</span> </span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">// 系统时钟 72MHz</span></span><br><span class="line">    <span class="type">uint32_t</span> ticks = <span class="number">72000000</span> * ms / <span class="number">1000</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span>(SysTick_Config(ticks))&#123;</span><br><span class="line">        <span class="keyword">while</span>(<span class="number">1</span>); <span class="comment">/* 配置失败了，死循环 */</span></span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="comment">/* 这里我们只设置SysTick的优先级，PendSV的在别的地方（OS_StartScheduler里）设置 */</span></span><br><span class="line">    NVIC_SetPriority(SysTick_IRQn, <span class="number">14</span>); </span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<p>此外，我们还需要在<code>os_cpu.c</code>中提供一个“触发任务切换”的接口，供内核调用。这样内核就不需要知道具体是操作哪个寄存器了。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_cpu.c */</span></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_Trigger_PendSV</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    SCB-&gt;ICSR |= SCB_ICSR_PENDSVSET_Msk; <span class="comment">// 实际上就是我们上期写的OS_Yield函数，只是用宏来写</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<h2 id="3-任务链表与创建逻辑"><a href="#3-任务链表与创建逻辑" class="headerlink" title="3 任务链表与创建逻辑"></a>3 任务链表与创建逻辑</h2><p>接下来我们开始处理任务调度逻辑。首先我们需要一个任务列表来给任务排队，最好的方式就是用链表实现。我们直接给TCB中添加一个成员<code>struct Task_Control_Block *Next</code>，用于指向下一个任务的TCB。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.h */</span></span><br><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span></span></span><br><span class="line"><span class="class">&#123;</span></span><br><span class="line">    <span class="keyword">volatile</span> <span class="type">uint32_t</span> *stackPtr;     <span class="comment">///&lt; 任务对应的栈指针</span></span><br><span class="line">    <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span> *<span class="title">Next</span>;</span> <span class="comment">///&lt; 指向下一个任务的指针</span></span><br><span class="line">&#125; OS_TCB;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<p>接着我们来写一个创建任务的函数<code>OS_TaskCreate()</code>。之前我们写的<code>OS_StackInit()</code>只是初始化了任务栈，现在我们要把任务串成一个<strong>单向循环链表</strong>。</p>
+<p>逻辑如下：</p>
+<ul>
+<li>如果当前<code>CurrentTask == NULL</code>，说明还没有任务，我们就把新任务TCB的<code>Next</code>指向自己，顺便把<code>CurrentTCB</code>也指向它。</li>
+<li>否则呢，我们就把新任务TCB的<code>Next</code>指向<code>CurrentTCB</code>的下一个任务，再把<code>CurrentTCB</code>的<code>Next</code>指向这个新任务的TCB。</li>
+</ul>
+<p>这样一来，新任务总是被插入到<code>CurrentTCB</code>的后面。我们在<code>os_core.c</code>中完成这个函数的实现。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.c */</span></span><br><span class="line"></span><br><span class="line"><span class="comment">/* 全局变量定义 */</span></span><br><span class="line">OS_TCB* CurrentTCB = <span class="literal">NULL</span>;</span><br><span class="line">OS_TCB* NextTCB = <span class="literal">NULL</span>;</span><br><span class="line"><span class="type">uint32_t</span> g_SystemTickCount = <span class="number">0</span>; <span class="comment">// 系统时基</span></span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_TaskCreate</span><span class="params">(OS_TCB* tcb, <span class="type">void</span>* task_function, <span class="type">uint32_t</span>* stack_init_address, <span class="type">uint32_t</span> stack_depth)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">// 初始化栈</span></span><br><span class="line">    tcb-&gt;stackPtr = OS_StackInit(task_function, stack_init_address, stack_depth);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 链表插入逻辑</span></span><br><span class="line">    <span class="keyword">if</span>(CurrentTCB == <span class="literal">NULL</span>)&#123;</span><br><span class="line">        tcb-&gt;Next = tcb;</span><br><span class="line">        CurrentTCB = tcb;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">else</span>&#123;</span><br><span class="line">        tcb-&gt;Next = CurrentTCB-&gt;Next;</span><br><span class="line">        CurrentTCB-&gt;Next = tcb;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<h2 id="4-核心调度器"><a href="#4-核心调度器" class="headerlink" title="4 核心调度器"></a>4 核心调度器</h2><p>OK，我们终于可以开始写<strong>调度器</strong>的核心逻辑了。</p>
+<p>按照解耦的思路，我们在<code>os_core.c</code>中定义一个<code>OS_Tick_Handler()</code>函数。这个函数会被硬件中断调用，它是OS处理时间片的大脑。</p>
+<p>它的逻辑非常清晰：</p>
+<ol>
+<li>更新系统时间（<code>g_SystemTickCount++</code>）。</li>
+<li>寻找下一个任务（时间片轮转的核心就是：下一个任务 &#x3D; 当前任务的Next）。</li>
+<li>如果需要切换，就调用<code>OS_Trigger_PendSV</code>。</li>
+</ol>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.c */</span></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_Tick_Handler</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">// 1. 安全检查</span></span><br><span class="line">    <span class="keyword">if</span> (CurrentTCB == <span class="literal">NULL</span>) <span class="keyword">return</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 2. 更新系统时间</span></span><br><span class="line">    g_SystemTickCount++;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 3. 核心调度逻辑 (Round Robin)</span></span><br><span class="line">    <span class="comment">// 以后如果你想改优先级调度，只需要改这里</span></span><br><span class="line">    NextTCB = CurrentTCB-&gt;Next;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 4. 请求上下文切换</span></span><br><span class="line">    <span class="comment">// 这里不再直接写寄存器，而是调用移植层 os_cpu.c 的接口</span></span><br><span class="line">    <span class="keyword">if</span> (NextTCB != CurrentTCB) &#123;</span><br><span class="line">        OS_Trigger_PendSV();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<p>现在，内核逻辑写好了，我们需要把它挂载到真正的硬件中断上。请打开<code>stm32f1xx_it.c</code>，找到<code>SysTick_Handler()</code>，修改如下：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in stm32f1xx_it.c */</span></span><br><span class="line"><span class="comment">/* 记得引用头文件 #include &quot;os_core.h&quot; */</span></span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">SysTick_Handler</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">// 1. 维持 HAL 库基准 (这是 BSP 的职责，为了兼容HAL_Delay)</span></span><br><span class="line">    HAL_IncTick();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 2. 通知 OS：一个 Tick 过去了 (这是 OS 的职责)</span></span><br><span class="line">    OS_Tick_Handler();</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<h2 id="5-启动！"><a href="#5-启动！" class="headerlink" title="5 启动！"></a>5 启动！</h2><p>万事俱备，只欠东风。我们需要一个函数来启动整个调度系统。为了防止栈错误，我们用C语言重新写一个开启调度器的函数，把原来汇编里的<code>OS_Start</code>删掉。</p>
+<p>这里有一个非常巧妙的<strong>Trick</strong>：<br>在第一次触发上下文切换时，我们只有<code>NextTCB</code>（第一个要跑的任务），但没有“上一个任务”需要保存。如果<code>PendSV</code>傻乎乎地去保存<code>CurrentTCB</code>的上下文，而此时<code>CurrentTCB</code>指向的栈可能是乱的，系统就崩了。</p>
+<p>所以，我们在启动时，故意将<code>CurrentTCB</code>设为<code>NULL</code>。还记得我们在<code>PendSV_Handler</code>汇编代码里写的那句判断吗？<code>CMP R1, #0</code> —— 如果<code>CurrentTCB</code>是0，就跳过保存上下文的步骤，直接执行恢复上下文！</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.c */</span></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_StartScheduler</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">// 1. 此时 CurrentTCB 在 CreateTask 时已经被设置为链表头了（比如 TaskA）</span></span><br><span class="line">    <span class="comment">// 但我们不能直接让 PendSV 看到它，否则会尝试保存 TaskA 的栈（但 TaskA 还没跑过，栈是初始化的）</span></span><br><span class="line">    </span><br><span class="line">    <span class="keyword">if</span> (CurrentTCB == <span class="literal">NULL</span>) <span class="keyword">return</span>; <span class="comment">// 防御性代码</span></span><br><span class="line"></span><br><span class="line">    <span class="comment">// 2. 关键步骤：设置 NextTCB 为第一个要运行的任务</span></span><br><span class="line">    NextTCB = CurrentTCB;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 3. 关键步骤：欺骗 PendSV</span></span><br><span class="line">    <span class="comment">// 将 CurrentTCB 暂时设为 NULL。</span></span><br><span class="line">    <span class="comment">// 这样 PendSV 里的 &quot;CMP R1, #0&quot; 就会成立，从而跳过 STMDB (保存上下文)，</span></span><br><span class="line">    <span class="comment">// 直接执行 RestoreContext (恢复 NextTCB 的上下文)。</span></span><br><span class="line">    CurrentTCB = <span class="literal">NULL</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 4. 初始化 SysTick (开启时间片，开始 1ms 中断)</span></span><br><span class="line">    <span class="comment">// 注意：OS_Tick_Handler 里有一句 if(CurrentTCB != NULL)，</span></span><br><span class="line">    <span class="comment">// 所以在 PendSV 执行完第一次切换并恢复 CurrentTCB 之前，</span></span><br><span class="line">    <span class="comment">// 即使 SysTick 提前触发了，也不会乱调度。</span></span><br><span class="line">    OS_Init_Timer(<span class="number">1</span>); </span><br><span class="line"></span><br><span class="line">    <span class="comment">// 5. 触发 PendSV，开始第一次切换！</span></span><br><span class="line">    OS_Trigger_PendSV();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 6. 应该永远不会执行到这里</span></span><br><span class="line">    <span class="keyword">while</span>(<span class="number">1</span>);</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<p>至此，我们的<strong>时间片轮转调度系统</strong>就搭建完成了！</p>
+<p>和上一期一样，我们同样把两个任务设置成一个变量++，如下：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">Task1</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">for</span>(;;)&#123;</span><br><span class="line">    count1++;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">Task2</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">for</span>(;;)&#123;</span><br><span class="line">    count2++;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>打开调试器，观察Watch1窗口。这次你会发现，和上次不同，两个变量相差好像挺大的。</p>
+<p><img src="https://pic1.imgdb.cn/item/69414a740dd29e7e2249be7e.png"></p>
+<p>这里任务1代表的<code>count1</code>转换成十进制是<strong>8897345</strong>，任务2代表的<code>count2</code>转换成十进制是<strong>8885449</strong>。相差了大约12000。</p>
+<p>实际上，这恰恰证明了我们成功的完成了时间片轮转。在某1ms内，任务1疯狂的循环，<code>count1</code>疯狂的++；在下一ms内，又轮到任务2的<code>count2</code>疯狂的++。我们截图的这一瞬间，就是任务1正在运行（即将结束）的一个时间。</p>
+<p>如果你不放心，也可以把任务改成翻转一个GPIO或类似的操作，然后加一个软件<code>for</code>循环延时来可视化。</p>
+<h2 id="6-总结"><a href="#6-总结" class="headerlink" title="6 总结"></a>6 总结</h2><p>至此，我们已经完成了RTOS的核心功能：<strong>多任务并发</strong>！下一期，我们将探讨如何将任务停下来，让出CPU给别的任务。</p>
+<link rel="stylesheet" href="/css/spoiler.css" type="text/css"><script src="/js/spoiler.js" type="text/javascript" async></script></article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://sandocean.cn">SandOcean</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://sandocean.cn/2025/12/16/2025-12-16-RTOS5/">https://sandocean.cn/2025/12/16/2025-12-16-RTOS5/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://sandocean.cn" target="_blank">Kallocain.</a>！</span></div></div><div class="tag_share"><div class="post-share"><div class="social-share" data-image="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" data-sites="facebook,twitter,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related full-width" href="/2025/12/15/2025-12-15-RTOS4/" title="Build Your Own RTOS Part4：PendSV"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">Build Your Own RTOS Part4：PendSV</div></div><div class="info-2"><div class="info-item-1"> Build Your Own RTOS 系列文章：  理解M3架构 硬件自动压栈 初始化栈 当前阅读：PendSV 时间片轮转   1 PendSV在前几期中，我们已经理解了寄存器，学会了如何模仿硬件压栈来完成上下文切换。本期我们就要在PendSV_Handler()中实现它。 1.1 什么是PendSV？PendSV（Pendable Service Call，可挂起的系统调用）是CM3内核专门设计的一种异常。就如字面所述，它是可以“挂起”（等待）的。 如果没有PendSV，我们可能要在别的中断（例如SysTick中）完成上下文切换。试想一下，我们正在处理紧急的硬件中断（或其他高优先级的任务），这时SysTick过来，不分青红皂白的切换上下文，直接让CPU去执行别的普通任务，原任务就被搁置了，这对我们的系统是致命的。 但是有了PendSV就不一样了。我们通常把PendSV的优先级设置成全系统最低（优先级号越大，优先级越低）。当SysTick触发任务切换的指令时，系统会先检查有没有比PendSV优先级更高的中断，如果有就先去执行优先级高的，直到最后只剩下PendSV，此时才执行...</div></div></div></a></nav></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">SandOcean</div><div class="author-info-description">兴趣使然</div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">14</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">5</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/SandOcean-ovo"><i class="fab fa-github"></i><span>Visit My Github</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://space.bilibili.com/39935035" target="_blank" title="bilibili"><i class="fab fa-bilibili" style="color: #00aeec;"></i></a><a class="social-icon" href="mailto:sandocean435@gmail.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a><a class="social-icon" href="https://www.zhihu.com/people/unbreakable-71" target="_blank" title="Zhihu"><i class="fab fa-zhihu" style="color: #0084ff;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">欢迎来到我的博客！
+转载请注明出处，并保留原文链接。
+</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#1-RTOS%E7%9A%84%E5%BF%83%E8%B7%B3"><span class="toc-number">1.</span> <span class="toc-text">1 RTOS的心跳</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-SysTick-%E7%A1%AC%E4%BB%B6%E5%88%9D%E5%A7%8B%E5%8C%96"><span class="toc-number">2.</span> <span class="toc-text">2 SysTick 硬件初始化</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#3-%E4%BB%BB%E5%8A%A1%E9%93%BE%E8%A1%A8%E4%B8%8E%E5%88%9B%E5%BB%BA%E9%80%BB%E8%BE%91"><span class="toc-number">3.</span> <span class="toc-text">3 任务链表与创建逻辑</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#4-%E6%A0%B8%E5%BF%83%E8%B0%83%E5%BA%A6%E5%99%A8"><span class="toc-number">4.</span> <span class="toc-text">4 核心调度器</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#5-%E5%90%AF%E5%8A%A8%EF%BC%81"><span class="toc-number">5.</span> <span class="toc-text">5 启动！</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#6-%E6%80%BB%E7%BB%93"><span class="toc-number">6.</span> <span class="toc-text">6 总结</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/16/2025-12-16-RTOS5/" title="Build Your Own RTOS Part5：时间片轮转">Build Your Own RTOS Part5：时间片轮转</a><time datetime="2025-12-15T16:00:00.000Z" title="发表于 2025-12-16 00:00:00">2025-12-16</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/15/2025-12-15-RTOS4/" title="Build Your Own RTOS Part4：PendSV">Build Your Own RTOS Part4：PendSV</a><time datetime="2025-12-14T16:00:00.000Z" title="发表于 2025-12-15 00:00:00">2025-12-15</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/13/2025-12-13-RTOS3/" title="Build Your Own RTOS Part3：初始化栈">Build Your Own RTOS Part3：初始化栈</a><time datetime="2025-12-12T16:00:00.000Z" title="发表于 2025-12-13 00:00:00">2025-12-13</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/12/2025-12-12-RTOS2/" title="Build Your Own RTOS Part2：硬件自动压栈">Build Your Own RTOS Part2：硬件自动压栈</a><time datetime="2025-12-11T16:00:00.000Z" title="发表于 2025-12-12 00:00:00">2025-12-12</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/10/2025-12-10-RTOS1/" title="Build Your Own RTOS Part1：理解M3架构的寄存器">Build Your Own RTOS Part1：理解M3架构的寄存器</a><time datetime="2025-12-09T16:00:00.000Z" title="发表于 2025-12-10 00:00:00">2025-12-10</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;2025 By SandOcean</span><span class="framework-info"><span>框架 </span><a target="_blank" rel="noopener" href="https://hexo.io">Hexo 7.3.0</a><span class="footer-separator">|</span><span>主题 </span><a target="_blank" rel="noopener" href="https://github.com/jerryc127/hexo-theme-butterfly">Butterfly 5.4.2</a></span></div><div class="footer_custom_text">活着多好呀！我写这些文章的目的也就是使人觉得：活着多好呀！--汪曾祺<p><a target="_blank" href="https://hexo.io/"><img src="https://img.shields.io/badge/Frame-Hexo-blue?style=flat&logo=hexo" title="博客框架为Hexo"></a>&nbsp;<a target="_blank" href="https://butterfly.js.org/"><img src="https://img.shields.io/badge/Theme-Butterfly-6513df?style=flat&logo=bitdefender" title="主题采用butterfly"></a>&nbsp;<a target="_blank" href="https://vercel.com/ "><img src="https://img.shields.io/badge/Hosted-Vervel-brightgreen?style=flat&logo=Vercel" title="本站线路托管于Vercel"></a>&nbsp;<a target="_blank" href="https://github.com/"><img src="https://img.shields.io/badge/Source-Github-d021d6?style=flat&logo=GitHub" title="本站项目由Gtihub托管"></a>&nbsp;<a target="_blank" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/Copyright-BY--NC--SA%204.0-d42328?style=flat&logo=Claris" title="本站采用知识共享署名-非商业性使用-相同方式共享4.0国际许可协议进行许可"></a></p></div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js"></script><script src="/js/main.js"></script><script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.umd.min.js"></script><div class="js-pjax"></div><div class="aplayer no-destroy" data-id="14033257171" data-server="netease" data-type="playlist" data-fixed="true" data-autoplay="true" data-mini="true" data-loop="all" data-volume="0.7" data-mutex="true"> </div><script defer type="text/javascript" src="https://cdn1.tianli0.top/npm/sweetalert2@8.19.0/dist/sweetalert2.all.js"></script><script defer src="/js/lunar.js"></script><script defer src="/js/day.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax/pjax.min.js"></script><script>(() => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => fn())
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      const usePjax = true
+      false
+        ? (usePjax ? pjax.loadUrl('/404.html') : window.location.href = '/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})()</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script><div id="local-search"><div class="search-dialog"><nav class="search-nav"><span class="search-dialog-title">搜索</span><span id="loading-status"></span><button class="search-close-button"><i class="fas fa-times"></i></button></nav><div class="text-center" id="loading-database"><i class="fas fa-spinner fa-pulse"></i><span>  数据加载中</span></div><div class="search-wrap"><div id="local-search-input"><div class="local-search-box"><input class="local-search-box--input" placeholder="搜索" type="text"/></div></div><hr/><div id="local-search-results"></div><div id="local-search-stats-wrap"></div></div></div><div id="search-mask"></div><script src="/js/search/local-search.js"></script></div></div></body></html>
