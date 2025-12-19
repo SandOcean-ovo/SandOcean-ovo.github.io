@@ -1,0 +1,365 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>Build Your Own RTOS Part7：信号量 | Kallocain.</title><meta name="author" content="SandOcean"><meta name="copyright" content="SandOcean"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="Build Your Own RTOS 系列文章：  理解M3架构 硬件自动压栈 初始化栈 PendSV 时间片轮转 延时 当前阅读：信号量   1 孤独的任务上期我们实现了多任务调度，两个任务轮流运行，看起来很不错。但是实际任务肯定不止点灯这么简单，如果多个任务想要同时接触一个全局变量，或者任务1要等待按键按下才运行，怎么办？  如果直接访问：会发生竞争冒险，数据会出错。 如果用while死循">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Build Your Own RTOS Part7：信号量">
+<meta property="og:url" content="https://sandocean.cn/2025/12/19/2025-12-19-RTOS7/index.html">
+<meta property="og:site_name" content="Kallocain.">
+<meta property="og:description" content="Build Your Own RTOS 系列文章：  理解M3架构 硬件自动压栈 初始化栈 PendSV 时间片轮转 延时 当前阅读：信号量   1 孤独的任务上期我们实现了多任务调度，两个任务轮流运行，看起来很不错。但是实际任务肯定不止点灯这么简单，如果多个任务想要同时接触一个全局变量，或者任务1要等待按键按下才运行，怎么办？  如果直接访问：会发生竞争冒险，数据会出错。 如果用while死循">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg">
+<meta property="article:published_time" content="2025-12-18T16:00:00.000Z">
+<meta property="article:modified_time" content="2025-12-19T11:44:36.858Z">
+<meta property="article:author" content="SandOcean">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Build Your Own RTOS Part7：信号量",
+  "url": "https://sandocean.cn/2025/12/19/2025-12-19-RTOS7/",
+  "image": "https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg",
+  "datePublished": "2025-12-18T16:00:00.000Z",
+  "dateModified": "2025-12-19T11:44:36.858Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "SandOcean",
+      "url": "https://sandocean.cn"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg"><link rel="canonical" href="https://sandocean.cn/2025/12/19/2025-12-19-RTOS7/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//hm.baidu.com"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.min.css" media="print" onload="this.media='all'"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?b9733e1826ee6247512254081aee7846";
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+btf.addGlobalFn('pjaxComplete', () => {
+  _hmt.push(['_trackPageview',window.location.pathname])
+}, 'baidu_analytics')
+</script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: {"path":"/search.xml","preload":true,"top_n_per_article":1,"unescape":false,"languages":{"hits_empty":"未找到符合您查询的内容：${query}","hits_stats":"共找到 ${hits} 篇文章"}},
+  translate: undefined,
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '天',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'fancybox',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: false,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: 'Build Your Own RTOS Part7：信号量',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><link rel="stylesheet" href="/css/custom.css" media="defer" onload="this.media='all'"><meta name="generator" content="Hexo 7.3.0"></head><body><div id="web_bg" style="background-image: url(/img/111.jpg);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">16</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">5</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><span class="site-name">Kallocain.</span></a><a class="nav-page-title" href="/"><span class="site-name">Build Your Own RTOS Part7：信号量</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div id="search-button"><span class="site-page social-icon search"><i class="fas fa-search fa-fw"></i><span> 搜索</span></span></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">Build Your Own RTOS Part7：信号量</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2025-12-18T16:00:00.000Z" title="发表于 2025-12-19 00:00:00">2025-12-19</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2025-12-19T11:44:36.858Z" title="更新于 2025-12-19 19:44:36">2025-12-19</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/Build-Your-Own-RTOS-%E7%B3%BB%E5%88%97/">Build Your Own RTOS 系列</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">2.6k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>9分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><blockquote>
+<p><strong>Build Your Own RTOS 系列文章</strong>：</p>
+<ol>
+<li><a href="/2025/12/10/2025-12-10-RTOS1/" title="Build Your Own RTOS Part1：理解M3架构的寄存器">理解M3架构</a></li>
+<li><a href="/2025/12/12/2025-12-12-RTOS2/" title="Build Your Own RTOS Part2：硬件自动压栈">硬件自动压栈</a></li>
+<li><a href="/2025/12/13/2025-12-13-RTOS3/" title="Build Your Own RTOS Part3：初始化栈">初始化栈</a></li>
+<li><a href="/2025/12/15/2025-12-15-RTOS4/" title="Build Your Own RTOS Part4：PendSV">PendSV</a></li>
+<li><a href="/2025/12/16/2025-12-16-RTOS5/" title="Build Your Own RTOS Part5：时间片轮转">时间片轮转</a></li>
+<li><a href="/2025/12/18/2025-12-18-RTOS6/" title="Build Your Own RTOS Part6：延时">延时</a></li>
+<li><strong>当前阅读：信号量</strong></li>
+</ol>
+</blockquote>
+<h2 id="1-孤独的任务"><a href="#1-孤独的任务" class="headerlink" title="1 孤独的任务"></a>1 孤独的任务</h2><p>上期我们实现了多任务调度，两个任务轮流运行，看起来很不错。但是实际任务肯定不止点灯这么简单，如果多个任务想要同时接触一个全局变量，或者任务1要等待按键按下才运行，怎么办？</p>
+<ul>
+<li>如果直接访问：会发生竞争冒险，数据会出错。</li>
+<li>如果用<code>while</code>死循环等待：会让CPU卡死在这里（如果我们实现了优先级调度，低优先级的任务就会被“饿死”）。</li>
+</ul>
+<p>所以，为了解决以上的问题，我们需要实现两个功能：<strong>临界区</strong>和<strong>信号量</strong>。</p>
+<h2 id="2-临界区"><a href="#2-临界区" class="headerlink" title="2 临界区"></a>2 临界区</h2><p>假如任务1和任务2要完成<code>cnt++</code>（假设用三条指令：读、改、写完成）。</p>
+<p>正当任务1读到<code>cnt = 5</code>的时候，中断来了，切换成任务2，它也读到了<code>cnt = 5</code>，然后把数据加上去，此时<code>cnt = 6</code>。然后任务1又回来了，它只记得<code>cnt = 5</code>，于是把<code>cnt = 6</code>写上去。结果就是，虽然看起来加了两次，但是只成功了一次。对于一个敏感的数据，这个错误是不可接受的。</p>
+<p>解决办法也很简单：在<code>cnt++</code>时，强行把中断关了，不让任务切换，直到我完成数据处理之后。这就是<strong>临界区</strong>的意义。</p>
+<p>在上期中，我们已经实现了一个简单的临界区：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">OS_Delay</span><span class="params">(<span class="type">uint32_t</span> ticks)</span></span><br><span class="line">&#123;</span><br><span class="line">    OS_Disable_IRQ(); <span class="comment">// &lt;--- 进入临界区</span></span><br><span class="line">    CurrentTCB-&gt;DelayTicks = ticks;</span><br><span class="line">    OS_Enable_IRQ(); <span class="comment">// &lt;--- 退出临界区</span></span><br><span class="line">    </span><br><span class="line">    OS_Trigger_PendSV();</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="2-1-嵌套陷阱"><a href="#2-1-嵌套陷阱" class="headerlink" title="2.1 嵌套陷阱"></a>2.1 嵌套陷阱</h3><p>实际上，临界区的实现非常简单，只需要封装好开关中断的函数就可以。但是这还不够。</p>
+<p>想象这样一个场景：函数A关了中断，准备干大事。中间它调用了函数B。函数B也需要保护，所以它也关了中断，干完活后<strong>开中断</strong>返回。<br>此时回到函数A，灾难发生了：<strong>函数A还没干完活，中断却被函数B打开了！</strong></p>
+<p>所以，简单的开关中断是不够的，我们需要引入“嵌套计数”的概念。</p>
+<h3 id="2-2-嵌套计数器的实现"><a href="#2-2-嵌套计数器的实现" class="headerlink" title="2.2 嵌套计数器的实现"></a>2.2 嵌套计数器的实现</h3><p>逻辑很简单：</p>
+<ol>
+<li>每次进入临界区，计数器+1，关中断。</li>
+<li>每次退出临界区，计数器-1。</li>
+<li><strong>只有当计数器减到0时，才真正打开中断。</strong></li>
+</ol>
+<p>我们在<code>os_core.c</code>里实现。首先我们需要一个全局变量<code>g_CriticalNesting</code>，其代表临界区<strong>嵌套</strong>的个数。</p>
+<div class='spoiler collapsed'>
+    <div class='spoiler-title'>
+        点击查看答案
+    </div>
+    <div class='spoiler-content'>
+        <figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.c */</span></span><br><span class="line"><span class="keyword">volatile</span> <span class="type">uint32_t</span> g_CriticalNesting = <span class="number">0</span>; <span class="comment">// 临界区嵌套计数器</span></span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_EnterCritical</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    OS_Disable_IRQ();</span><br><span class="line">    g_CriticalNesting++;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_ExitCritical</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">if</span>(g_CriticalNesting == <span class="number">0</span>) <span class="keyword">return</span>; <span class="comment">// 依旧防御性编程</span></span><br><span class="line"></span><br><span class="line">    g_CriticalNesting--;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 只有当所有嵌套都退出了，才真正允许中断</span></span><br><span class="line">    <span class="keyword">if</span>(g_CriticalNesting == <span class="number">0</span>)&#123;</span><br><span class="line">        OS_Enable_IRQ();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+    </div>
+</div>
+
+<h2 id="3-信号量：让任务学会“睡觉”"><a href="#3-信号量：让任务学会“睡觉”" class="headerlink" title="3 信号量：让任务学会“睡觉”"></a>3 信号量：让任务学会“睡觉”</h2><p>如果不使用信号量，当消费者任务等待数据时，代码通常写成：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">while</span> (flag == <span class="number">0</span>); <span class="comment">// 傻等，CPU 100% 占用，发热且低效</span></span><br><span class="line">DoWork();</span><br></pre></td></tr></table></figure>
+
+<p>我们需要一种机制，让任务在条件不满足时告诉调度器：“我没法干活了，把我从调度名单里划掉，我去睡会儿。”当条件满足（比如按键中断来了），再由别人把该任务“叫醒（放回就绪名单）”。</p>
+<p>信号量就是这个“条件”的载体。本期我们实现的是一个极简化的信号量，只完成一个死等的动作。</p>
+<h3 id="3-1-改造数据结构"><a href="#3-1-改造数据结构" class="headerlink" title="3.1 改造数据结构"></a>3.1 改造数据结构</h3><p>首先，信号量本质上是一个计数器，代表着“<strong>可用资源的数量</strong>”。但更重要的是，如果有任务来要资源却没要到，它得有个地方排队。</p>
+<p>所以，我们在<code>os_core.h</code>里定义信号量结构体：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">Semaphore</span></span></span><br><span class="line"><span class="class">&#123;</span></span><br><span class="line">    <span class="keyword">volatile</span> <span class="type">uint16_t</span> count; <span class="comment">// 资源计数</span></span><br><span class="line">    OS_TCB  *WaitListHead;   <span class="comment">// 排队队伍的头（谁第一个来排队的）</span></span><br><span class="line">    OS_TCB  *WaitListTail;   <span class="comment">// 排队队伍的尾（方便新来的排在后面）</span></span><br><span class="line">&#125; OS_Sem;</span><br></pre></td></tr></table></figure>
+
+<p>接下来是重头戏：<strong>改造TCB（任务控制块）</strong>。</p>
+<p>上期中，我们的任务只有“跑”和“不跑”的区别。现在任务变聪明了，它可能有不同的状态。我们要新建一个枚举：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.h */</span></span><br><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">enum</span> &#123;</span></span><br><span class="line">    TASK_READY = <span class="number">0</span>,  <span class="comment">///&lt; 就绪：随时可以跑，就在RunList里</span></span><br><span class="line">    TASK_BLOCKED,    <span class="comment">///&lt; 阻塞：在等时间，或者等信号量，暂时不能跑</span></span><br><span class="line">&#125; OS_TaskState;</span><br></pre></td></tr></table></figure>
+
+<p>然后，我们需要在TCB里增加两个关键成员：</p>
+<ol>
+<li><code>State</code>：记录当前任务是醒着还是睡着。</li>
+<li><code>NextWaitTask</code>：这是一个极其关键的指针。</li>
+</ol>
+<ul>
+<li><code>Next</code>指针是用来连接所有任务的（调度链表）。</li>
+<li><code>NextWaitTask</code>指针是用来连接<strong>正在等待同一个信号量</strong>的任务的（等待链表）。</li>
+<li><strong>这两个链表是独立的！</strong> 一个任务可以存在于调度链表中，但如果它阻塞了，它就会被逻辑上“移出”调度圈，并挂到信号量的等待链表上去。</li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.h */</span></span><br><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span></span></span><br><span class="line"><span class="class">&#123;</span></span><br><span class="line">    <span class="keyword">volatile</span> <span class="type">uint32_t</span> *stackPtr; </span><br><span class="line">    <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span> *<span class="title">Next</span>;</span>     <span class="comment">///&lt; 指向下一个任务（调度链表）</span></span><br><span class="line">    </span><br><span class="line">    OS_TaskState State;                  <span class="comment">///&lt; 任务状态（新增）</span></span><br><span class="line">    <span class="keyword">volatile</span> <span class="type">uint32_t</span> DelayTicks;        <span class="comment">///&lt; 延时时间</span></span><br><span class="line">    <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span> *<span class="title">NextWaitTask</span>;</span> <span class="comment">///&lt; 指向等待队列中的下一个任务（新增）</span></span><br><span class="line">&#125; OS_TCB;</span><br></pre></td></tr></table></figure>
+
+<h3 id="3-2-改造调度器"><a href="#3-2-改造调度器" class="headerlink" title="3.2 改造调度器"></a>3.2 改造调度器</h3><p>结构体变了，所有涉及TCB的函数都要改。</p>
+<p>首先是<code>OS_TaskCreate()</code>，我们需要初始化新增的成员：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.c */</span></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_TaskCreate</span><span class="params">(...)</span></span><br><span class="line">&#123;</span><br><span class="line">    tcb-&gt;stackPtr = OS_StackInit(task_function, stack_init_address, stack_depth);</span><br><span class="line"></span><br><span class="line">    tcb-&gt;DelayTicks = <span class="number">0</span>;</span><br><span class="line">    tcb-&gt;State = TASK_READY;  <span class="comment">// &lt;--- 默认生下来就是就绪的</span></span><br><span class="line">    tcb-&gt;NextWaitTask = <span class="literal">NULL</span>; <span class="comment">// &lt;--- 也没在排队</span></span><br><span class="line"></span><br><span class="line">    <span class="comment">// ... 链表插入代码不变 ...</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>接下来是<strong>调度逻辑</strong>的改变。我们修改<code>FindNextTask()</code>函数，让它从<strong>找没“睡觉”的任务</strong>到<strong>找准备好的任务</strong>。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">OS_TCB *<span class="title function_">FindNextTask</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">// 1. 从当前任务的下一个开始找</span></span><br><span class="line">    OS_TCB *TempTCB = CurrentTCB-&gt;Next;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 2. 如果该任务没就绪（State != TASK_READY），就找它的下一个，直到找到为止</span></span><br><span class="line">    <span class="keyword">while</span> (TempTCB-&gt;State != TASK_READY)</span><br><span class="line">    &#123;</span><br><span class="line">        TempTCB = TempTCB-&gt;Next;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> TempTCB;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>同时，<code>OS_Tick_Handler()</code>也需要进化。它不仅要负责计数，还要负责把“睡够了”的任务叫醒。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">OS_Tick_Handler</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">if</span> (CurrentTCB == <span class="literal">NULL</span>) <span class="keyword">return</span>;</span><br><span class="line"></span><br><span class="line">    g_SystemTickCount++;</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 遍历所有任务，处理延时</span></span><br><span class="line">    OS_TCB *ptr = CurrentTCB; </span><br><span class="line">    <span class="keyword">do</span></span><br><span class="line">    &#123;</span><br><span class="line">        <span class="comment">// 如果任务是被延时阻塞的</span></span><br><span class="line">        <span class="keyword">if</span> (ptr-&gt;State == TASK_BLOCKED &amp;&amp; ptr-&gt;DelayTicks &gt; <span class="number">0</span>)</span><br><span class="line">        &#123;</span><br><span class="line">            ptr-&gt;DelayTicks--;</span><br><span class="line">            <span class="keyword">if</span> (ptr-&gt;DelayTicks == <span class="number">0</span>)</span><br><span class="line">            &#123;</span><br><span class="line">                <span class="comment">// 时间到了，叫醒它！</span></span><br><span class="line">                ptr-&gt;State = TASK_READY;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">        ptr = ptr-&gt;Next; </span><br><span class="line">    &#125; <span class="keyword">while</span> (ptr != CurrentTCB);</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 核心调度：找下一个能跑的任务</span></span><br><span class="line">    NextTCB = FindNextTask();</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 如果找到的新任务不是当前任务，切换！</span></span><br><span class="line">    <span class="keyword">if</span> (NextTCB != CurrentTCB)</span><br><span class="line">    &#123;</span><br><span class="line">        OS_Trigger_PendSV();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>同理，<code>OS_Delay</code>函数也需要配合修改，把任务设为阻塞态：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">OS_Delay</span><span class="params">(<span class="type">uint32_t</span> ticks)</span></span><br><span class="line">&#123;</span><br><span class="line">    OS_EnterCritical(); <span class="comment">// 使用我们新的嵌套临界区</span></span><br><span class="line"></span><br><span class="line">    CurrentTCB-&gt;DelayTicks = ticks;</span><br><span class="line">    CurrentTCB-&gt;State = TASK_BLOCKED; <span class="comment">// &lt;--- 标记为阻塞</span></span><br><span class="line"></span><br><span class="line">    NextTCB = FindNextTask(); </span><br><span class="line">    </span><br><span class="line">    OS_Trigger_PendSV(); <span class="comment">// 触发切换</span></span><br><span class="line"></span><br><span class="line">    OS_ExitCritical(); </span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<h3 id="3-3-实现信号量逻辑"><a href="#3-3-实现信号量逻辑" class="headerlink" title="3.3 实现信号量逻辑"></a>3.3 实现信号量逻辑</h3><p>做好了铺垫，终于可以写信号量的核心逻辑了：<code>Wait</code>（申请）和<code>Post</code>（释放）。</p>
+<p><strong>1. OS_SemWait (申请资源)</strong></p>
+<p>逻辑如下：</p>
+<ul>
+<li><strong>有资源吗？</strong> (<code>count &gt; 0</code>) -&gt; 有，拿走 (<code>count--</code>)，开心返回。</li>
+<li><strong>没资源？</strong> -&gt; 那我得排队。</li>
+</ul>
+<ol>
+<li>把自己设为 <code>TASK_BLOCKED</code>（调度器以后别找我了）。</li>
+<li>把自己挂到信号量的 <code>WaitList</code> 队尾（利用 <code>NextWaitTask</code> 指针）。</li>
+<li>触发任务切换（让出CPU给别人）。</li>
+</ol>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_core.c */</span></span><br><span class="line"><span class="type">uint8_t</span> <span class="title function_">OS_SemWait</span><span class="params">(OS_Sem *p_sem)</span></span><br><span class="line">&#123;</span><br><span class="line">    OS_EnterCritical();</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">if</span> (p_sem-&gt;count &gt; <span class="number">0</span>) <span class="comment">// 情况1：有资源</span></span><br><span class="line">    &#123;</span><br><span class="line">        p_sem-&gt;count--;</span><br><span class="line">        OS_ExitCritical();</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>; </span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">else</span> <span class="comment">// 情况2：没资源，我要排队</span></span><br><span class="line">    &#123;</span><br><span class="line">        CurrentTCB-&gt;State = TASK_BLOCKED; <span class="comment">// 1. 睡觉</span></span><br><span class="line">        CurrentTCB-&gt;NextWaitTask = <span class="literal">NULL</span>;  <span class="comment">// 我是队尾，后面没人</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// 2. 把自己挂到等待队列的尾巴上</span></span><br><span class="line">        <span class="keyword">if</span> (p_sem-&gt;WaitListHead == <span class="literal">NULL</span>) <span class="comment">// 如果之前没人排队</span></span><br><span class="line">        &#123;</span><br><span class="line">            p_sem-&gt;WaitListHead = CurrentTCB; <span class="comment">// 我既是头</span></span><br><span class="line">            p_sem-&gt;WaitListTail = CurrentTCB; <span class="comment">// 也是尾</span></span><br><span class="line">        &#125;</span><br><span class="line">        <span class="keyword">else</span> <span class="comment">// 已经有人在排队了</span></span><br><span class="line">        &#123;</span><br><span class="line">            p_sem-&gt;WaitListTail-&gt;NextWaitTask = CurrentTCB; <span class="comment">// 告诉目前队尾那个人，我排你后面</span></span><br><span class="line">            p_sem-&gt;WaitListTail = CurrentTCB; <span class="comment">// 更新队尾指针指向我</span></span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 3. 立即切换任务</span></span><br><span class="line">        NextTCB = FindNextTask();</span><br><span class="line">        OS_Trigger_PendSV();</span><br><span class="line">        </span><br><span class="line">        OS_ExitCritical();</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<p><strong>2. OS_SemPost (释放资源)</strong></p>
+<p>逻辑如下：</p>
+<ul>
+<li><strong>有人在排队吗？</strong> (<code>WaitListHead != NULL</code>)</li>
+<li><strong>有</strong>：别把资源放回去了，直接把排在队首的那哥们叫醒（<code>TASK_READY</code>），把资源给它（虽然代码上没有<code>count++</code>再<code>count--</code>，但逻辑上是直接移交）。然后把队首指针往后移一位。</li>
+<li><strong>没人排队</strong>：那就把资源计数器+1 (<code>count++</code>)。</li>
+</ul>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">uint8_t</span> <span class="title function_">OS_SemPost</span><span class="params">(OS_Sem *p_sem)</span></span><br><span class="line">&#123;</span><br><span class="line">    OS_EnterCritical();</span><br><span class="line">    </span><br><span class="line">    <span class="keyword">if</span> (p_sem-&gt;WaitListHead == <span class="literal">NULL</span>) <span class="comment">// 没人排队</span></span><br><span class="line">    &#123;</span><br><span class="line">        p_sem-&gt;count++; <span class="comment">// 资源增加</span></span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">else</span> <span class="comment">// 有人排队，直接把资源给队首的人</span></span><br><span class="line">    &#123;</span><br><span class="line">        OS_TCB *TaskToWake = p_sem-&gt;WaitListHead; <span class="comment">// 找到队首任务</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// 1. 从等待队列里把这人摘出来</span></span><br><span class="line">        p_sem-&gt;WaitListHead = TaskToWake-&gt;NextWaitTask; <span class="comment">// 队首变成下一个人</span></span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 如果取完这个人队列空了，要把尾指针也清空</span></span><br><span class="line">        <span class="keyword">if</span> (p_sem-&gt;WaitListHead == <span class="literal">NULL</span>)</span><br><span class="line">        &#123;</span><br><span class="line">            p_sem-&gt;WaitListTail = <span class="literal">NULL</span>;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 2. 叫醒它</span></span><br><span class="line">        TaskToWake-&gt;NextWaitTask = <span class="literal">NULL</span>; <span class="comment">// 断开它的排队链接</span></span><br><span class="line">        TaskToWake-&gt;State = TASK_READY;  <span class="comment">// 设置为就绪！</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">// 3. 触发调度</span></span><br><span class="line">        NextTCB = FindNextTask();</span><br><span class="line">        OS_Trigger_PendSV();</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    OS_ExitCritical();</span><br><span class="line">    <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<h2 id="4-启动测试"><a href="#4-启动测试" class="headerlink" title="4 启动测试"></a>4 启动测试</h2><p>OK，所有准备工作结束，我们就可以开始测试了。</p>
+<ul>
+<li><strong>任务1</strong>：等待信号量。一旦拿到信号量，就翻转LED。</li>
+<li><strong>任务2</strong>：监控按键。一旦按键按下，释放一个信号量。</li>
+</ul>
+<p>效果应该是：平时LED不亮（任务1在死等），按下按键后，LED翻转一次。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br></pre></td><td class="code"><pre><span class="line">OS_Sem Sem = &#123; .count = <span class="number">0</span>, </span><br><span class="line">    .WaitListHead = <span class="literal">NULL</span>, </span><br><span class="line">    .WaitListTail = <span class="literal">NULL</span> </span><br><span class="line">&#125;;</span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">Task1</span><span class="params">(<span class="type">void</span>)</span> <span class="comment">// 消费者</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">for</span>(;;)&#123;</span><br><span class="line">    <span class="keyword">if</span>(OS_SemWait(&amp;Sem))&#123; </span><br><span class="line">      HAL_GPIO_TogglePin(LED_BLUE_GPIO_Port, LED_BLUE_Pin);</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">Task2</span><span class="params">(<span class="type">void</span>)</span> <span class="comment">// 生产者</span></span><br><span class="line">&#123;</span><br><span class="line">  <span class="keyword">for</span>(;;)&#123;</span><br><span class="line">    <span class="keyword">if</span> (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_RESET)</span><br><span class="line">    &#123;</span><br><span class="line">      OS_Delay(<span class="number">20</span>); <span class="comment">// 消抖</span></span><br><span class="line">      <span class="keyword">if</span> (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_RESET)</span><br><span class="line">      &#123;</span><br><span class="line">        <span class="comment">// 按键按下了，发送信号量</span></span><br><span class="line">        OS_SemPost(&amp;Sem);</span><br><span class="line"></span><br><span class="line">        <span class="comment">// 等待按键松开</span></span><br><span class="line">        <span class="keyword">while</span> (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_RESET)</span><br><span class="line">        &#123;</span><br><span class="line">          OS_Delay(<span class="number">10</span>); <span class="comment">// 每次检测间隔10ms，让出CPU</span></span><br><span class="line">        &#125;</span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    OS_Delay(<span class="number">10</span>);</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<p>最后插板子，编译下载。</p>
+<p><img src="https://pic1.imgdb.cn/item/694537562ce92a4f9312454f.gif"></p>
+<p>每按一次按键，LED翻转一次。如果不按，任务1完全不占用CPU（在Block状态），效率极高。</p>
+<h2 id="5-总结"><a href="#5-总结" class="headerlink" title="5 总结"></a>5 总结</h2><p>至此，<code>Build Your Own RTOS</code>系列的基础篇已经全部结束了！</p>
+<p>通过这7期内容，我们从0开始：</p>
+<ol>
+<li>理解了汇编层面的<strong>堆栈</strong>和<strong>上下文切换</strong>。</li>
+<li>实现了<strong>PendSV</strong>中断调度。</li>
+<li>写出了<strong>时间片轮转</strong>算法。</li>
+<li>最终实现了<strong>信号量</strong>和<strong>任务阻塞</strong>机制。</li>
+</ol>
+<p>现在你手里的这个工程，虽然简陋，但已经具备了一个现代RTOS最核心的骨架。接下来作者也许会继续出提高篇（比如优先级调度、互斥锁、内存管理），不过不知道得什么时候了。</p>
+<p>感谢大家的陪伴，我们下个系列见！</p>
+<link rel="stylesheet" href="/css/spoiler.css" type="text/css"><script src="/js/spoiler.js" type="text/javascript" async></script></article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://sandocean.cn">SandOcean</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://sandocean.cn/2025/12/19/2025-12-19-RTOS7/">https://sandocean.cn/2025/12/19/2025-12-19-RTOS7/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://sandocean.cn" target="_blank">Kallocain.</a>！</span></div></div><div class="tag_share"><div class="post-share"><div class="social-share" data-image="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" data-sites="facebook,twitter,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related full-width" href="/2025/12/18/2025-12-18-RTOS6/" title="Build Your Own RTOS Part6：延时"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">Build Your Own RTOS Part6：延时</div></div><div class="info-2"><div class="info-item-1"> Build Your Own RTOS 系列文章：  理解M3架构 硬件自动压栈 初始化栈 PendSV 时间片轮转 当前阅读：延时 信号量   1 让出CPU在我们前几期所搭建出来的简易系统中，虽然已经完成了任务调度和时间片轮转，可以并发执行任务，但是当一个任务不需要运作，想要让出CPU给别的任务时，我们好像没有一个办法让其完成。 我们这一期就来解决这个问题：当任务不需要CPU时，它会主动进入“睡眠”状态，不再参与调度，直到时间到达。配合空闲任务，我们的系统就初步具备了资源管理的功能。这才像一个真正的RTOS。 我们先来构思一下具体的实现路径，就以大家都熟悉的硬件阻塞延时（比如ST的HAL库提供的HAL_Delay()）为例。HAL有一个时基变量uwTick，用于存储当前“系统时间”，实现方法是在定期触发的SysTick_Handler()中断中，让uwTick++。HAL_Delay()的完整实现如下： 123456789101112131415__weak void HAL_Delay(uint32_t Delay)&#123;  uint32_t tickstart =...</div></div></div></a></nav></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">SandOcean</div><div class="author-info-description">兴趣使然</div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">16</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">5</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/SandOcean-ovo"><i class="fab fa-github"></i><span>Visit My Github</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://space.bilibili.com/39935035" target="_blank" title="bilibili"><i class="fab fa-bilibili" style="color: #00aeec;"></i></a><a class="social-icon" href="mailto:sandocean435@gmail.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a><a class="social-icon" href="https://www.zhihu.com/people/unbreakable-71" target="_blank" title="Zhihu"><i class="fab fa-zhihu" style="color: #0084ff;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">欢迎来到我的博客！
+转载请注明出处，并保留原文链接。
+</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#1-%E5%AD%A4%E7%8B%AC%E7%9A%84%E4%BB%BB%E5%8A%A1"><span class="toc-number">1.</span> <span class="toc-text">1 孤独的任务</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-%E4%B8%B4%E7%95%8C%E5%8C%BA"><span class="toc-number">2.</span> <span class="toc-text">2 临界区</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#2-1-%E5%B5%8C%E5%A5%97%E9%99%B7%E9%98%B1"><span class="toc-number">2.1.</span> <span class="toc-text">2.1 嵌套陷阱</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-2-%E5%B5%8C%E5%A5%97%E8%AE%A1%E6%95%B0%E5%99%A8%E7%9A%84%E5%AE%9E%E7%8E%B0"><span class="toc-number">2.2.</span> <span class="toc-text">2.2 嵌套计数器的实现</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#3-%E4%BF%A1%E5%8F%B7%E9%87%8F%EF%BC%9A%E8%AE%A9%E4%BB%BB%E5%8A%A1%E5%AD%A6%E4%BC%9A%E2%80%9C%E7%9D%A1%E8%A7%89%E2%80%9D"><span class="toc-number">3.</span> <span class="toc-text">3 信号量：让任务学会“睡觉”</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#3-1-%E6%94%B9%E9%80%A0%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84"><span class="toc-number">3.1.</span> <span class="toc-text">3.1 改造数据结构</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-2-%E6%94%B9%E9%80%A0%E8%B0%83%E5%BA%A6%E5%99%A8"><span class="toc-number">3.2.</span> <span class="toc-text">3.2 改造调度器</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-3-%E5%AE%9E%E7%8E%B0%E4%BF%A1%E5%8F%B7%E9%87%8F%E9%80%BB%E8%BE%91"><span class="toc-number">3.3.</span> <span class="toc-text">3.3 实现信号量逻辑</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#4-%E5%90%AF%E5%8A%A8%E6%B5%8B%E8%AF%95"><span class="toc-number">4.</span> <span class="toc-text">4 启动测试</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#5-%E6%80%BB%E7%BB%93"><span class="toc-number">5.</span> <span class="toc-text">5 总结</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/19/2025-12-19-RTOS7/" title="Build Your Own RTOS Part7：信号量">Build Your Own RTOS Part7：信号量</a><time datetime="2025-12-18T16:00:00.000Z" title="发表于 2025-12-19 00:00:00">2025-12-19</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/18/2025-12-18-RTOS6/" title="Build Your Own RTOS Part6：延时">Build Your Own RTOS Part6：延时</a><time datetime="2025-12-17T16:00:00.000Z" title="发表于 2025-12-18 00:00:00">2025-12-18</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/16/2025-12-16-RTOS5/" title="Build Your Own RTOS Part5：时间片轮转">Build Your Own RTOS Part5：时间片轮转</a><time datetime="2025-12-15T16:00:00.000Z" title="发表于 2025-12-16 00:00:00">2025-12-16</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/15/2025-12-15-RTOS4/" title="Build Your Own RTOS Part4：PendSV">Build Your Own RTOS Part4：PendSV</a><time datetime="2025-12-14T16:00:00.000Z" title="发表于 2025-12-15 00:00:00">2025-12-15</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/13/2025-12-13-RTOS3/" title="Build Your Own RTOS Part3：初始化栈">Build Your Own RTOS Part3：初始化栈</a><time datetime="2025-12-12T16:00:00.000Z" title="发表于 2025-12-13 00:00:00">2025-12-13</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;2025 By SandOcean</span><span class="framework-info"><span>框架 </span><a target="_blank" rel="noopener" href="https://hexo.io">Hexo 7.3.0</a><span class="footer-separator">|</span><span>主题 </span><a target="_blank" rel="noopener" href="https://github.com/jerryc127/hexo-theme-butterfly">Butterfly 5.4.2</a></span></div><div class="footer_custom_text">活着多好呀！我写这些文章的目的也就是使人觉得：活着多好呀！--汪曾祺<p><a target="_blank" href="https://hexo.io/"><img src="https://img.shields.io/badge/Frame-Hexo-blue?style=flat&logo=hexo" title="博客框架为Hexo"></a>&nbsp;<a target="_blank" href="https://butterfly.js.org/"><img src="https://img.shields.io/badge/Theme-Butterfly-6513df?style=flat&logo=bitdefender" title="主题采用butterfly"></a>&nbsp;<a target="_blank" href="https://vercel.com/ "><img src="https://img.shields.io/badge/Hosted-Vervel-brightgreen?style=flat&logo=Vercel" title="本站线路托管于Vercel"></a>&nbsp;<a target="_blank" href="https://github.com/"><img src="https://img.shields.io/badge/Source-Github-d021d6?style=flat&logo=GitHub" title="本站项目由Gtihub托管"></a>&nbsp;<a target="_blank" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/Copyright-BY--NC--SA%204.0-d42328?style=flat&logo=Claris" title="本站采用知识共享署名-非商业性使用-相同方式共享4.0国际许可协议进行许可"></a></p></div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js"></script><script src="/js/main.js"></script><script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.umd.min.js"></script><div class="js-pjax"></div><div class="aplayer no-destroy" data-id="14033257171" data-server="netease" data-type="playlist" data-fixed="true" data-autoplay="true" data-mini="true" data-loop="all" data-volume="0.7" data-mutex="true"> </div><script defer type="text/javascript" src="https://cdn1.tianli0.top/npm/sweetalert2@8.19.0/dist/sweetalert2.all.js"></script><script defer src="/js/lunar.js"></script><script defer src="/js/day.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax/pjax.min.js"></script><script>(() => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => fn())
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      const usePjax = true
+      false
+        ? (usePjax ? pjax.loadUrl('/404.html') : window.location.href = '/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})()</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script><div id="local-search"><div class="search-dialog"><nav class="search-nav"><span class="search-dialog-title">搜索</span><span id="loading-status"></span><button class="search-close-button"><i class="fas fa-times"></i></button></nav><div class="text-center" id="loading-database"><i class="fas fa-spinner fa-pulse"></i><span>  数据加载中</span></div><div class="search-wrap"><div id="local-search-input"><div class="local-search-box"><input class="local-search-box--input" placeholder="搜索" type="text"/></div></div><hr/><div id="local-search-results"></div><div id="local-search-stats-wrap"></div></div></div><div id="search-mask"></div><script src="/js/search/local-search.js"></script></div></div></body></html>
