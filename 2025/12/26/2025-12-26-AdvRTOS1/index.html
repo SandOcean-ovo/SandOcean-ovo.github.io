@@ -1,0 +1,281 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>Build Your Own RTOS Advanced Part1：任务优先级 | Kallocain.</title><meta name="author" content="SandOcean"><meta name="copyright" content="SandOcean"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="Build Your Own RTOS Advanced系列文章：  当前阅读：任务优先级   写在前面这是 Build Your Own RTOS 系列文章的续集，也是提高篇。预计内容有四章：优先级调度、互斥锁、队列以及内存管理。这都是现代RTOS比较精髓的部分，但同时也会有一定的难度。和之前一样，作者不会手把手的教学写代码，只是记录自己的coding过程顺便记录一些知识点，希望做到一定的参考">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Build Your Own RTOS Advanced Part1：任务优先级">
+<meta property="og:url" content="https://sandocean.cn/2025/12/26/2025-12-26-AdvRTOS1/index.html">
+<meta property="og:site_name" content="Kallocain.">
+<meta property="og:description" content="Build Your Own RTOS Advanced系列文章：  当前阅读：任务优先级   写在前面这是 Build Your Own RTOS 系列文章的续集，也是提高篇。预计内容有四章：优先级调度、互斥锁、队列以及内存管理。这都是现代RTOS比较精髓的部分，但同时也会有一定的难度。和之前一样，作者不会手把手的教学写代码，只是记录自己的coding过程顺便记录一些知识点，希望做到一定的参考">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg">
+<meta property="article:published_time" content="2025-12-25T16:00:00.000Z">
+<meta property="article:modified_time" content="2025-12-27T07:29:44.276Z">
+<meta property="article:author" content="SandOcean">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Build Your Own RTOS Advanced Part1：任务优先级",
+  "url": "https://sandocean.cn/2025/12/26/2025-12-26-AdvRTOS1/",
+  "image": "https://sandocean.cn/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20[%E8%BD%AC%E6%8D%A2](1).jpg",
+  "datePublished": "2025-12-25T16:00:00.000Z",
+  "dateModified": "2025-12-27T07:29:44.276Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "SandOcean",
+      "url": "https://sandocean.cn"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg"><link rel="canonical" href="https://sandocean.cn/2025/12/26/2025-12-26-AdvRTOS1/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//hm.baidu.com"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.min.css" media="print" onload="this.media='all'"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!true && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "https://hm.baidu.com/hm.js?b9733e1826ee6247512254081aee7846";
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+btf.addGlobalFn('pjaxComplete', () => {
+  _hmt.push(['_trackPageview',window.location.pathname])
+}, 'baidu_analytics')
+</script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: {"path":"/search.xml","preload":true,"top_n_per_article":1,"unescape":false,"languages":{"hits_empty":"未找到符合您查询的内容：${query}","hits_stats":"共找到 ${hits} 篇文章"}},
+  translate: undefined,
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '天',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'fancybox',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: false,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: 'Build Your Own RTOS Advanced Part1：任务优先级',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><link rel="stylesheet" href="/css/custom.css" media="defer" onload="this.media='all'"><meta name="generator" content="Hexo 7.3.0"></head><body><div id="web_bg" style="background-image: url(/img/111.jpg);"></div><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">17</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">6</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><span class="site-name">Kallocain.</span></a><a class="nav-page-title" href="/"><span class="site-name">Build Your Own RTOS Advanced Part1：任务优先级</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div id="search-button"><span class="site-page social-icon search"><i class="fas fa-search fa-fw"></i><span> 搜索</span></span></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 时间轴</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-list"></i><span> 分类</span></a></div><div class="menus_item"><span class="site-page group hide"><i class="fa-fw fa fa-list"></i><span> 列表</span><i class="fas fa-chevron-down"></i></span><ul class="menus_item_child"><li><a class="site-page child" href="/music/"><i class="fa-fw fas fa-music"></i><span> 音乐</span></a></li><li><a class="site-page child" href="/Gallery/"><i class="fa-fw fas fa-images"></i><span> 照片</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> 友链</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">Build Your Own RTOS Advanced Part1：任务优先级</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2025-12-25T16:00:00.000Z" title="发表于 2025-12-26 00:00:00">2025-12-26</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2025-12-27T07:29:44.276Z" title="更新于 2025-12-27 15:29:44">2025-12-27</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/Build-Your-Own-RTOS-Advanced-%E7%B3%BB%E5%88%97/">Build Your Own RTOS Advanced 系列</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-wordcount"><i class="far fa-file-word fa-fw post-meta-icon"></i><span class="post-meta-label">总字数:</span><span class="word-count">2.4k</span><span class="post-meta-separator">|</span><i class="far fa-clock fa-fw post-meta-icon"></i><span class="post-meta-label">阅读时长:</span><span>8分钟</span></span><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><blockquote>
+<p><strong>Build Your Own RTOS Advanced系列文章</strong>：</p>
+<ol>
+<li><strong>当前阅读：任务优先级</strong></li>
+</ol>
+</blockquote>
+<h2 id="写在前面"><a href="#写在前面" class="headerlink" title="写在前面"></a>写在前面</h2><p>这是 <strong>Build Your Own RTOS</strong> 系列文章的续集，也是提高篇。预计内容有四章：优先级调度、互斥锁、队列以及内存管理。这都是现代RTOS比较精髓的部分，但同时也会有一定的难度。和之前一样，作者不会手把手的教学写代码，只是记录自己的coding过程顺便记录一些知识点，希望做到一定的参考作用。</p>
+<h2 id="1-升级"><a href="#1-升级" class="headerlink" title="1 升级"></a>1 升级</h2><p>在真实的系统中，时间片轮转虽然可以解决一部分的问题，但是有许多困难是不可解决的。比如说你的两个任务，闪烁LED和火灾报警，当报警的需求产生时，CPU却还在闪烁LED，在嵌入式系统中是难以接受的。所以，我们必须设计一种算法，让CPU可以判断哪个任务更加紧急，直接踢走低优先级的任务（即使它此刻正在运行！）。</p>
+<h3 id="1-1-时间复杂度与确定性"><a href="#1-1-时间复杂度与确定性" class="headerlink" title="1.1 时间复杂度与确定性"></a>1.1 时间复杂度与确定性</h3><p>既然我们需要设计算法，很自然的就可以想到<strong>遍历</strong>。CPU从零开始遍历一遍某个数组，直到其找到一个任务，这个任务就是优先级最高的。但是这个算法有一个显而易见的劣势：它的时间复杂度是<code>O(N)</code>，即所消耗的时间与任务个数成正比例。即使我们的任务很少，即使遍历数组这个操作本身非常快，我们还是不希望它这么做，因为这损坏了RTOS的<strong>确定性</strong>。我们希望在系统中的每一个操作都只需要<strong>恒定时间</strong>，而不是像遍历这样消耗不确定的时间。</p>
+<p>所以，我们应该且必须设计出一个<code>O(1)</code>的算法。这就引出一个概念：<strong>位图（Bitmap）</strong>。所谓位图，就是使用一个定长的整数，例如<code>uint32_t</code>，作为一个“地图”，它的每一位来代表一个优先级。比如第0位是1，就代表有一个优先级为0的任务。（注意我们一般设定优先级数字越低，优先级越高。<em>为了简化，本期我们只实现同个优先级下只有一个任务</em>）</p>
+<p>那么查找优先级，就变成了：<strong>找到在这个整数中的位数最低的1</strong>。这时你的脑海里可能自动蹦出了软件的实现方法：循环查找每一位，直到找到一个1。但是这样不还是<code>O(N)</code>吗？所以我们不能依赖软件来实现，直接用硬件给我们优化好的指令<code>CLZ</code>。这条指令可以在一个指令周期内就完成：查找一个整数前面有多少个0。注意如果单独使用<code>CLZ</code>只能找到优先级最低的任务，所以我们配合上另一条指令<code>RBIT</code>来翻转一个整数，这样就可以找到优先级最高的任务，且只消耗两个指令周期。</p>
+<h2 id="2-开始编码"><a href="#2-开始编码" class="headerlink" title="2 开始编码"></a>2 开始编码</h2><p>理论说完了，其实很简单。但是我们需要修改的地方是很多的，包括TCB、<code>FindNextTask()</code>等等。</p>
+<h3 id="2-1-TCB"><a href="#2-1-TCB" class="headerlink" title="2.1 TCB"></a>2.1 TCB</h3><p>任务的优先级是任务的特性，自然是塞在任务控制块里。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span></span></span><br><span class="line"><span class="class">&#123;</span></span><br><span class="line">    <span class="keyword">volatile</span> <span class="type">uint32_t</span> *stackPtr; <span class="comment">///&lt; 任务对应的栈指针</span></span><br><span class="line">    <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span> *<span class="title">Next</span>;</span> <span class="comment">///&lt; 指向下一个任务的指针</span></span><br><span class="line">    OS_TaskState State; <span class="comment">///&lt; 任务状态</span></span><br><span class="line">    <span class="keyword">volatile</span> <span class="type">uint32_t</span> DelayTicks; <span class="comment">///&lt; 延时的时间（单位ms）</span></span><br><span class="line">    <span class="class"><span class="keyword">struct</span> <span class="title">Task_Control_Block</span> *<span class="title">NextWaitTask</span>;</span> <span class="comment">///&lt; 指向下一个正在等待同一个信号量的任务</span></span><br><span class="line">    <span class="keyword">volatile</span> <span class="type">uint8_t</span> Priority;  <span class="comment">///&lt; 任务优先级</span></span><br><span class="line">&#125; OS_TCB;</span><br></pre></td></tr></table></figure>
+
+<h3 id="2-2-就绪列表"><a href="#2-2-就绪列表" class="headerlink" title="2.2 就绪列表"></a>2.2 就绪列表</h3><p>现在我们的任务轮转不能是简单的<code>CurrentTCB-&gt;Next</code>，我们需要新建一个全局的指针数组<code>OS_TCB *ReadyList[OS_MAX_PRIO]</code>（这里的<code>OS_MAX_PRIO</code>应该用一个宏定义，通常设为32）。<code>ReadyList[0]</code>存放优先级为 0 的任务指针，<code>ReadyList[1]</code>存放优先级为 1 的任务指针……</p>
+<p>好了，有了列表之后，我们就要想它如何和我们的位图<code>uint32_t g_PrioMap</code>交互。<code>ReadyList[0]</code>对应的应该是<code>g_PrioMap</code>的第0位，以此类推。当一个优先级为p的任务进入&#x2F;退出阻塞态时，位图中对应的位就要置0&#x2F;置1。</p>
+<p><strong>注意：我们并不能删除TCB里的<code>Next</code>成员。</strong> <code>OS_Tick_Handler()</code>仍然使用旧的任务链表来管理时间，只是调度改用新的方法。</p>
+<h3 id="2-3-FindNextTask"><a href="#2-3-FindNextTask" class="headerlink" title="2.3 FindNextTask"></a>2.3 <code>FindNextTask</code></h3><p>有了以上逻辑，其实<code>FindNextTask()</code>的逻辑也很清晰了。这里直接给出代码。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* in os_cpu.c */</span></span><br><span class="line"><span class="type">uint8_t</span> <span class="title function_">OS_GetTopPrio</span><span class="params">(<span class="type">uint32_t</span> PrioMap)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">return</span> __CLZ(__RBIT(PrioMap)); <span class="comment">// 这是ARM封装好的两个宏指令，和上面的汇编指令一样</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">/* in os_core.c */</span></span><br><span class="line">OS_TCB *<span class="title function_">FindNextTask</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">if</span>(g_PrioMap == <span class="number">0</span>) <span class="keyword">while</span>(<span class="number">1</span>); <span class="comment">// 如果g_PrioMap==0 说明出现错误，我们就卡在这</span></span><br><span class="line"></span><br><span class="line">    <span class="type">uint8_t</span> TopPrio = OS_GetTopPrio(g_PrioMap); <span class="comment">// 由于涉及宏汇编指令，我们在os_cpu.c里封装Get_TopPrio</span></span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> ReadyList[TopPrio];</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="2-4-注册与注销"><a href="#2-4-注册与注销" class="headerlink" title="2.4 注册与注销"></a>2.4 注册与注销</h3><p>注册和注销，就是任务进入&#x2F;退出就绪态所要做的事情：将自身填入<code>ReadyList</code>或在<code>ReadyList</code>里清除自己，修改<code>g_PrioMap</code>自己对应的那一位。</p>
+<p>我们这里将这两个操作封装成辅助函数。它们的逻辑非常简单，都只需两行代码：</p>
+<ul>
+<li>注册：任务对应哪个优先级，就把<code>g_PrioMap</code>对应的那一位置1，然后将<code>ReadyList</code>中任务优先级对应的那个元素替换成这个任务。</li>
+<li>注销：任务对应哪个优先级，就把<code>g_PrioMap</code>对应的那一位置0，然后将<code>ReadyList</code>中任务优先级对应的那个元素替换成<code>NULL</code>。</li>
+</ul>
+<p>代码如下：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">static</span> <span class="type">void</span> <span class="title function_">OS_ReadyListAdd</span><span class="params">(OS_TCB* tcb)</span></span><br><span class="line">&#123;</span><br><span class="line">    g_PrioMap |= (<span class="number">1U</span> &lt;&lt; tcb-&gt;Priority);</span><br><span class="line">    ReadyList[tcb-&gt;Priority] = tcb;</span><br><span class="line">&#125; </span><br><span class="line"></span><br><span class="line"><span class="type">static</span> <span class="type">void</span> <span class="title function_">OS_ReadyListRemove</span><span class="params">(OS_TCB* tcb)</span></span><br><span class="line">&#123;</span><br><span class="line">    g_PrioMap &amp;= ~(<span class="number">1U</span> &lt;&lt; tcb-&gt;Priority);</span><br><span class="line">    ReadyList[tcb-&gt;Priority] = <span class="literal">NULL</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>接下来我们就可以用这两个函数修改其他的地方。对于每一个把任务设置为就绪态&#x2F;阻塞态的地方，都要有一个注册或注销的函数对应。我们首先修改<code>OS_TaskCreate()</code>，添加任务优先级的初始化，然后不要忘记由于任务出生时是就绪的，所以这个函数里也要注册一次任务。然后我们要修改<code>OS_Tick_Handler()</code>、<code>OS_Delay()</code>、<code>OS_SemWait()</code>、<code>OS_SemPost()</code>。注意还要修改<code>OS_StartScheduler()</code>里空闲函数的初始化部分，将空闲函数的优先级设置为最低（数值最高，31）。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">OS_TaskCreate</span><span class="params">(OS_TCB *tcb, <span class="type">void</span> *task_function, <span class="type">uint32_t</span> *stack_init_address, <span class="type">uint32_t</span> stack_depth, <span class="type">uint8_t</span> priority)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">/* 之前代码 */</span></span><br><span class="line">    tcb-&gt;NextWaitTask = <span class="literal">NULL</span>;</span><br><span class="line">    tcb-&gt;Priority = priority; <span class="comment">// 给任务设置优先级</span></span><br><span class="line">    OS_ReadyListAdd(tcb); <span class="comment">// 注册任务</span></span><br><span class="line">    <span class="comment">/* 之后代码不变 */</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_Tick_Handler</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">/* 之前代码不变 */</span></span><br><span class="line">    <span class="keyword">do</span></span><br><span class="line">    &#123;</span><br><span class="line">        <span class="keyword">if</span> (ptr-&gt;State == TASK_BLOCKED)</span><br><span class="line">        &#123;</span><br><span class="line">            <span class="keyword">if</span> (ptr-&gt;DelayTicks &gt; <span class="number">0</span>)</span><br><span class="line">            &#123;</span><br><span class="line">                ptr-&gt;DelayTicks--;</span><br><span class="line">                <span class="keyword">if</span> (ptr-&gt;DelayTicks == <span class="number">0</span>)</span><br><span class="line">                &#123;</span><br><span class="line">                    ptr-&gt;State = TASK_READY;</span><br><span class="line">                    OS_ReadyListAdd(ptr); <span class="comment">// 添加注册</span></span><br><span class="line">                &#125;</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">        ptr = ptr-&gt;Next; <span class="comment">// 将当前标记指针指向下一个任务</span></span><br><span class="line">    &#125; <span class="keyword">while</span> (ptr != CurrentTCB);</span><br><span class="line">    <span class="comment">/* 之后代码不变 */</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="type">void</span> <span class="title function_">OS_Delay</span><span class="params">(<span class="type">uint32_t</span> ticks)</span></span><br><span class="line">&#123; </span><br><span class="line">    <span class="comment">/* 之前代码不变 */</span></span><br><span class="line">    CurrentTCB-&gt;State = TASK_BLOCKED; </span><br><span class="line">    OS_ReadyListRemove(CurrentTCB); <span class="comment">// 添加注销</span></span><br><span class="line">    <span class="comment">/* 之后代码不变 */</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="type">uint8_t</span> <span class="title function_">OS_SemWait</span><span class="params">(OS_Sem *p_sem)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">/* 之前代码不变 */</span></span><br><span class="line">    <span class="keyword">else</span> <span class="comment">// 原本没信号量，我睡觉去了，直到信号量来了</span></span><br><span class="line">    &#123;</span><br><span class="line">        CurrentTCB-&gt;State = TASK_BLOCKED; <span class="comment">// 设置当前任务状态</span></span><br><span class="line"></span><br><span class="line">        OS_ReadyListRemove(CurrentTCB); <span class="comment">// 添加注销</span></span><br><span class="line"></span><br><span class="line">        <span class="comment">/* 之后代码不变 */</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="type">uint8_t</span> <span class="title function_">OS_SemPost</span><span class="params">(OS_Sem *p_sem)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="comment">/* 之前代码不变 */</span></span><br><span class="line">    <span class="keyword">else</span></span><br><span class="line">    &#123;</span><br><span class="line">      <span class="comment">/* 省略 */</span></span><br><span class="line">        TaskToWake-&gt;State = TASK_READY;</span><br><span class="line"></span><br><span class="line">        OS_ReadyListAdd(TaskToWake); <span class="comment">// 添加注册</span></span><br><span class="line"></span><br><span class="line">        NextTCB = FindNextTask(); <span class="comment">// 寻找是否有高优先级的任务苏醒了</span></span><br><span class="line">        OS_Trigger_PendSV(); <span class="comment">// 立刻触发PendSV 这就是抢占</span></span><br><span class="line">        OS_ExitCritical();</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+<p>至此，我们所有的优先级调度代码修改完毕了。</p>
+<h2 id="3-动手"><a href="#3-动手" class="headerlink" title="3 动手"></a>3 动手</h2><p>代码写完了就开始实操。我们在<code>main.c</code>里创建这样两个任务：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 高优先级任务 (Prio 0)</span></span><br><span class="line"><span class="type">void</span> <span class="title function_">Task_High</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">while</span> (<span class="number">1</span>)</span><br><span class="line">    &#123;</span><br><span class="line">        <span class="comment">// 翻转 LED_BLUE</span></span><br><span class="line">        HAL_GPIO_TogglePin(LED_BLUE_GPIO_Port, LED_BLUE_Pin);</span><br><span class="line">        </span><br><span class="line">        <span class="comment">// 纯软件延时（死循环），不交出 CPU 权！</span></span><br><span class="line">        <span class="comment">// 绝对不要调用 OS_Delay 或 OS_SemWait</span></span><br><span class="line">        <span class="keyword">for</span>(<span class="keyword">volatile</span> <span class="type">int</span> i=<span class="number">0</span>; i&lt;<span class="number">1000000</span>; i++); </span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 低优先级任务 (Prio 1)</span></span><br><span class="line"><span class="type">void</span> <span class="title function_">Task_Low</span><span class="params">(<span class="type">void</span>)</span></span><br><span class="line">&#123;</span><br><span class="line">    <span class="keyword">while</span> (<span class="number">1</span>)</span><br><span class="line">    &#123;</span><br><span class="line">        <span class="comment">// 如果抢占逻辑正确，这行代码永远不会执行</span></span><br><span class="line">        <span class="comment">// LED_RED 应该永远不亮，或者保持初始状态</span></span><br><span class="line">        HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);</span><br><span class="line">        </span><br><span class="line">        OS_Delay(<span class="number">100</span>);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以看到，高优先级的任务从不进入阻塞态，一直处于就绪态。也就是说，如果我们的抢占调度逻辑正常，高优先级的任务会“饿死”低优先级的任务，让红灯永远保持状态。</p>
+<h2 id="4-总结"><a href="#4-总结" class="headerlink" title="4 总结"></a>4 总结</h2><p>至此，我们的RTOS完成了一次质的飞跃。通过引入位图和硬件指令优化，我们成功将调度算法的时间复杂度压到了<code>O(1)</code>。这意味着无论系统中有多少个任务，调度器都能在恒定的时间内找到那个最重要的任务，这正是“硬实时”系统的基石。</p>
+<p>在最后的实验中，我们亲眼见证了“饥饿”现象：高优先级任务无情地霸占了CPU，低优先级任务完全无法运行。虽然这验证了我们的抢占逻辑是正确的，但在实际开发中，任务之间往往需要协作和共享资源。如果低优先级任务占用了资源还没来得及释放，就被高优先级任务抢占了，会发生什么？</p>
+<p>这就引入了并发编程中最棘手的问题之一——<strong>竞态条件</strong>与<strong>优先级反转</strong>。为了解决这些问题，单纯的信号量可能已经力不从心了。</p>
+<p>下一章，我们将深入探讨“互斥（Mutex）”，看看它是如何保护共享资源，又是如何防止高优先级任务被“卡死”的。</p>
+<link rel="stylesheet" href="/css/spoiler.css" type="text/css"><script src="/js/spoiler.js" type="text/javascript" async></script></article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://sandocean.cn">SandOcean</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://sandocean.cn/2025/12/26/2025-12-26-AdvRTOS1/">https://sandocean.cn/2025/12/26/2025-12-26-AdvRTOS1/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://sandocean.cn" target="_blank">Kallocain.</a>！</span></div></div><div class="tag_share"><div class="post-share"><div class="social-share" data-image="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" data-sites="facebook,twitter,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related full-width" href="/2025/12/19/2025-12-19-RTOS7/" title="Build Your Own RTOS Part7：信号量"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">Build Your Own RTOS Part7：信号量</div></div><div class="info-2"><div class="info-item-1"> Build Your Own RTOS 系列文章：  理解M3架构 硬件自动压栈 初始化栈 PendSV 时间片轮转 延时 当前阅读：信号量   1 孤独的任务上期我们实现了多任务调度，两个任务轮流运行，看起来很不错。但是实际任务肯定不止点灯这么简单，如果多个任务想要同时接触一个全局变量，或者任务1要等待按键按下才运行，怎么办？  如果直接访问：会发生竞争冒险，数据会出错。 如果用while死循环等待：会让CPU卡死在这里（如果我们实现了优先级调度，低优先级的任务就会被“饿死”）。  所以，为了解决以上的问题，我们需要实现两个功能：临界区和信号量。 2 临界区假如任务1和任务2要完成cnt++（假设用三条指令：读、改、写完成）。 正当任务1读到cnt = 5的时候，中断来了，切换成任务2，它也读到了cnt = 5，然后把数据加上去，此时cnt = 6。然后任务1又回来了，它只记得cnt = 5，于是把cnt = 6写上去。结果就是，虽然看起来加了两次，但是只成功了一次。对于一个敏感的数据，这个错误是不可接受的。 解决办法也很简单：在cnt++时，强行把中断关了，不让任务切换，直...</div></div></div></a></nav></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/LOGO-%E6%B2%99%E6%B5%B7%E6%BD%9C%E6%B8%B81%20%5B%E8%BD%AC%E6%8D%A2%5D(1).jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">SandOcean</div><div class="author-info-description">兴趣使然</div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">17</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">4</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">6</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/SandOcean-ovo"><i class="fab fa-github"></i><span>Visit My Github</span></a><div class="card-info-social-icons"><a class="social-icon" href="https://space.bilibili.com/39935035" target="_blank" title="bilibili"><i class="fab fa-bilibili" style="color: #00aeec;"></i></a><a class="social-icon" href="mailto:sandocean435@gmail.com" target="_blank" title="Email"><i class="fas fa-envelope" style="color: #4a7dbe;"></i></a><a class="social-icon" href="https://www.zhihu.com/people/unbreakable-71" target="_blank" title="Zhihu"><i class="fab fa-zhihu" style="color: #0084ff;"></i></a></div></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">欢迎来到我的博客！
+转载请注明出处，并保留原文链接。
+</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%86%99%E5%9C%A8%E5%89%8D%E9%9D%A2"><span class="toc-number">1.</span> <span class="toc-text">写在前面</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#1-%E5%8D%87%E7%BA%A7"><span class="toc-number">2.</span> <span class="toc-text">1 升级</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-1-%E6%97%B6%E9%97%B4%E5%A4%8D%E6%9D%82%E5%BA%A6%E4%B8%8E%E7%A1%AE%E5%AE%9A%E6%80%A7"><span class="toc-number">2.1.</span> <span class="toc-text">1.1 时间复杂度与确定性</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#2-%E5%BC%80%E5%A7%8B%E7%BC%96%E7%A0%81"><span class="toc-number">3.</span> <span class="toc-text">2 开始编码</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#2-1-TCB"><span class="toc-number">3.1.</span> <span class="toc-text">2.1 TCB</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-2-%E5%B0%B1%E7%BB%AA%E5%88%97%E8%A1%A8"><span class="toc-number">3.2.</span> <span class="toc-text">2.2 就绪列表</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-3-FindNextTask"><span class="toc-number">3.3.</span> <span class="toc-text">2.3 FindNextTask</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-4-%E6%B3%A8%E5%86%8C%E4%B8%8E%E6%B3%A8%E9%94%80"><span class="toc-number">3.4.</span> <span class="toc-text">2.4 注册与注销</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#3-%E5%8A%A8%E6%89%8B"><span class="toc-number">4.</span> <span class="toc-text">3 动手</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#4-%E6%80%BB%E7%BB%93"><span class="toc-number">5.</span> <span class="toc-text">4 总结</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/26/2025-12-26-AdvRTOS1/" title="Build Your Own RTOS Advanced Part1：任务优先级">Build Your Own RTOS Advanced Part1：任务优先级</a><time datetime="2025-12-25T16:00:00.000Z" title="发表于 2025-12-26 00:00:00">2025-12-26</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/19/2025-12-19-RTOS7/" title="Build Your Own RTOS Part7：信号量">Build Your Own RTOS Part7：信号量</a><time datetime="2025-12-18T16:00:00.000Z" title="发表于 2025-12-19 00:00:00">2025-12-19</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/18/2025-12-18-RTOS6/" title="Build Your Own RTOS Part6：延时">Build Your Own RTOS Part6：延时</a><time datetime="2025-12-17T16:00:00.000Z" title="发表于 2025-12-18 00:00:00">2025-12-18</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/16/2025-12-16-RTOS5/" title="Build Your Own RTOS Part5：时间片轮转">Build Your Own RTOS Part5：时间片轮转</a><time datetime="2025-12-15T16:00:00.000Z" title="发表于 2025-12-16 00:00:00">2025-12-16</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2025/12/15/2025-12-15-RTOS4/" title="Build Your Own RTOS Part4：PendSV">Build Your Own RTOS Part4：PendSV</a><time datetime="2025-12-14T16:00:00.000Z" title="发表于 2025-12-15 00:00:00">2025-12-15</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;2025 By SandOcean</span><span class="framework-info"><span>框架 </span><a target="_blank" rel="noopener" href="https://hexo.io">Hexo 7.3.0</a><span class="footer-separator">|</span><span>主题 </span><a target="_blank" rel="noopener" href="https://github.com/jerryc127/hexo-theme-butterfly">Butterfly 5.4.2</a></span></div><div class="footer_custom_text">活着多好呀！我写这些文章的目的也就是使人觉得：活着多好呀！--汪曾祺<p><a target="_blank" href="https://hexo.io/"><img src="https://img.shields.io/badge/Frame-Hexo-blue?style=flat&logo=hexo" title="博客框架为Hexo"></a>&nbsp;<a target="_blank" href="https://butterfly.js.org/"><img src="https://img.shields.io/badge/Theme-Butterfly-6513df?style=flat&logo=bitdefender" title="主题采用butterfly"></a>&nbsp;<a target="_blank" href="https://vercel.com/ "><img src="https://img.shields.io/badge/Hosted-Vervel-brightgreen?style=flat&logo=Vercel" title="本站线路托管于Vercel"></a>&nbsp;<a target="_blank" href="https://github.com/"><img src="https://img.shields.io/badge/Source-Github-d021d6?style=flat&logo=GitHub" title="本站项目由Gtihub托管"></a>&nbsp;<a target="_blank" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/Copyright-BY--NC--SA%204.0-d42328?style=flat&logo=Claris" title="本站采用知识共享署名-非商业性使用-相同方式共享4.0国际许可协议进行许可"></a></p></div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js"></script><script src="/js/main.js"></script><script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox/fancybox.umd.min.js"></script><div class="js-pjax"></div><div class="aplayer no-destroy" data-id="14033257171" data-server="netease" data-type="playlist" data-fixed="true" data-autoplay="true" data-mini="true" data-loop="all" data-volume="0.7" data-mutex="true"> </div><script defer type="text/javascript" src="https://cdn1.tianli0.top/npm/sweetalert2@8.19.0/dist/sweetalert2.all.js"></script><script defer src="/js/lunar.js"></script><script defer src="/js/day.js"></script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.js"></script><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc/metingjs/dist/Meting.min.js"></script><script>(() => {
+  const destroyAplayer = () => {
+    if (window.aplayers) {
+      for (let i = 0; i < window.aplayers.length; i++) {
+        if (!window.aplayers[i].options.fixed) {
+          window.aplayers[i].destroy()
+        }
+      }
+    }
+  }
+
+  const runMetingJS = () => {
+    typeof loadMeting === 'function' && document.getElementsByClassName('aplayer').length && loadMeting()
+  }
+
+  btf.addGlobalFn('pjaxSend', destroyAplayer, 'destroyAplayer')
+  btf.addGlobalFn('pjaxComplete', loadMeting, 'runMetingJS')
+})()</script><script src="https://cdn.jsdelivr.net/npm/pjax/pjax.min.js"></script><script>(() => {
+  const pjaxSelectors = ["head > title","#config-diff","#body-wrap","#rightside-config-hide","#rightside-config-show",".js-pjax"]
+
+  window.pjax = new Pjax({
+    elements: 'a:not([target="_blank"])',
+    selectors: pjaxSelectors,
+    cacheBust: false,
+    analytics: false,
+    scrollRestoration: false
+  })
+
+  const triggerPjaxFn = (val) => {
+    if (!val) return
+    Object.values(val).forEach(fn => fn())
+  }
+
+  document.addEventListener('pjax:send', () => {
+    // removeEventListener
+    btf.removeGlobalFnEvent('pjaxSendOnce')
+    btf.removeGlobalFnEvent('themeChange')
+
+    // reset readmode
+    const $bodyClassList = document.body.classList
+    if ($bodyClassList.contains('read-mode')) $bodyClassList.remove('read-mode')
+
+    triggerPjaxFn(window.globalFn.pjaxSend)
+  })
+
+  document.addEventListener('pjax:complete', () => {
+    btf.removeGlobalFnEvent('pjaxCompleteOnce')
+    document.querySelectorAll('script[data-pjax]').forEach(item => {
+      const newScript = document.createElement('script')
+      const content = item.text || item.textContent || item.innerHTML || ""
+      Array.from(item.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value))
+      newScript.appendChild(document.createTextNode(content))
+      item.parentNode.replaceChild(newScript, item)
+    })
+
+    triggerPjaxFn(window.globalFn.pjaxComplete)
+  })
+
+  document.addEventListener('pjax:error', e => {
+    if (e.request.status === 404) {
+      const usePjax = true
+      false
+        ? (usePjax ? pjax.loadUrl('/404.html') : window.location.href = '/404.html')
+        : window.location.href = e.request.responseURL
+    }
+  })
+})()</script><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script><div id="local-search"><div class="search-dialog"><nav class="search-nav"><span class="search-dialog-title">搜索</span><span id="loading-status"></span><button class="search-close-button"><i class="fas fa-times"></i></button></nav><div class="text-center" id="loading-database"><i class="fas fa-spinner fa-pulse"></i><span>  数据加载中</span></div><div class="search-wrap"><div id="local-search-input"><div class="local-search-box"><input class="local-search-box--input" placeholder="搜索" type="text"/></div></div><hr/><div id="local-search-results"></div><div id="local-search-stats-wrap"></div></div></div><div id="search-mask"></div><script src="/js/search/local-search.js"></script></div></div></body></html>
